@@ -1,169 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1020" />
+  <meta charset="UTF-8" />
   <title>TapBeat</title>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-  <!-- SPLASH -->
-  <div id="splash" class="splash" aria-hidden="false">
-    <div class="splashCard">
-      <div class="splashBrand">Nota Bene studio</div>
-      <div class="splashPresents">presents</div>
-      <div class="splashShine"></div>
+
+<!-- INTRO -->
+<div id="intro" class="screen active">
+  <div class="intro-card">
+    <h1><span>Nota Bene</span> studio</h1>
+    <p>PRESENTS</p>
+  </div>
+</div>
+
+<!-- MAIN MENU -->
+<div id="menu" class="screen">
+  <h1 class="logo">TapBeat</h1>
+  <button id="playBtn" class="main-btn">PLAY</button>
+  <button id="settingsBtn" class="secondary-btn">SETTINGS</button>
+</div>
+
+<!-- GAME -->
+<div id="game" class="screen">
+
+  <!-- HUD -->
+  <div class="hud">
+    <div>SCORE <span id="score">0</span></div>
+    <div>COMBO <span id="combo">0</span></div>
+    <div>BPM <span id="bpm">90</span></div>
+    <button id="gear">⚙️</button>
+  </div>
+
+  <!-- PLAY FIELD -->
+  <div id="field">
+    <div id="target">
+      <div class="core"></div>
     </div>
   </div>
 
-  <!-- MAIN MENU -->
-  <div id="mainMenu" class="screen hidden" aria-hidden="true">
-    <div class="menuWrap">
-      <div class="logo">
-        <div class="logoTop">TapBeat</div>
-        <div class="logoSub">Bright rhythm tapping • unlock vibes • chase combos</div>
-      </div>
+  <!-- FEEDBACK -->
+  <div id="feedback"></div>
 
-      <div class="menuButtons">
-        <button id="btnPlay" class="btn btnPrimary">Play</button>
-        <button id="btnTutorial" class="btn btnGhost">Tutorial</button>
-        <button id="btnAchievements" class="btn btnGhost">Achievements</button>
-        <button id="btnShop" class="btn btnGhost">Shop</button>
-      </div>
+</div>
 
-      <div class="menuFooter">
-        <div class="pill">Coins: <span id="coinsHome">0</span></div>
-        <div class="pill">Best Combo: <span id="bestComboHome">0</span></div>
-      </div>
-    </div>
-  </div>
+<!-- SETTINGS -->
+<div id="settings" class="screen modal">
+  <h2>Settings</h2>
+  <label>
+    <input type="checkbox" id="vibrationToggle" checked />
+    Vibration
+  </label>
+  <button id="closeSettings">Close</button>
+</div>
 
-  <!-- GAME -->
-  <div id="gameUI" class="game hidden" aria-hidden="true">
-    <!-- background FX layer -->
-    <div class="bgFX" aria-hidden="true"></div>
-
-    <!-- HUD -->
-    <div class="hud">
-      <div class="hudLeft">
-        <div class="hudItem">
-          <div class="hudLabel">SCORE</div>
-          <div id="hudScore" class="hudValue">0</div>
-        </div>
-        <div class="hudItem">
-          <div class="hudLabel">COMBO</div>
-          <div id="hudCombo" class="hudValue">0</div>
-        </div>
-        <div class="hudItem">
-          <div class="hudLabel">COINS</div>
-          <div id="hudCoins" class="hudValue">0</div>
-        </div>
-      </div>
-
-      <div class="hudRight">
-        <div class="hudMini">
-          <span class="hudMiniLabel">BPM</span>
-          <span id="hudBpm" class="hudMiniValue">92</span>
-        </div>
-        <div class="hudMini">
-          <span class="hudMiniLabel">LV</span>
-          <span id="hudLv" class="hudMiniValue">1</span>
-        </div>
-
-        <button id="btnGear" class="gear" aria-label="Settings">
-          <span class="gearIcon">⚙︎</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- FEEDBACK (anime/comic style) -->
-    <div id="feedback" class="feedback" aria-live="polite"></div>
-
-    <!-- Canvas full screen -->
-    <canvas id="gameCanvas"></canvas>
-
-    <!-- Bottom bar -->
-    <div class="bottomBar">
-      <div class="bottomLeft">Vibe: <span id="hudVibe">Verse</span></div>
-      <div class="bottomRight">Energy: <span id="hudEnergy">0%</span></div>
-    </div>
-  </div>
-
-  <!-- OVERLAYS -->
-  <div id="overlayDim" class="overlayDim hidden" aria-hidden="true"></div>
-
-  <!-- SETTINGS PANEL -->
-  <div id="settingsPanel" class="panel hidden" aria-hidden="true">
-    <div class="panelHeader">
-      <div class="panelTitle">Settings</div>
-      <button id="btnCloseSettings" class="panelClose" aria-label="Close">✕</button>
-    </div>
-
-    <div class="panelBody">
-      <label class="toggleRow">
-        <span>Vibration</span>
-        <input id="toggleHaptics" type="checkbox" />
-      </label>
-
-      <label class="toggleRow">
-        <span>Sound</span>
-        <input id="toggleSound" type="checkbox" />
-      </label>
-
-      <div class="panelDivider"></div>
-
-      <button id="btnResume" class="btn btnPrimary">Resume</button>
-      <button id="btnBackToMenu" class="btn btnGhost">Back to Menu</button>
-    </div>
-  </div>
-
-  <!-- TUTORIAL -->
-  <div id="tutorialPanel" class="panel hidden" aria-hidden="true">
-    <div class="panelHeader">
-      <div class="panelTitle">Tutorial</div>
-      <button id="btnCloseTutorial" class="panelClose" aria-label="Close">✕</button>
-    </div>
-    <div class="panelBody">
-      <ol class="tutorialList">
-        <li><b>Tap only on the circle.</b> Tapping outside = <b>MISS</b>.</li>
-        <li>Hit close to the beat to get <b>GREAT</b> or <b>PERFECT</b>.</li>
-        <li>Keep combo — BPM rises and the music becomes richer.</li>
-        <li>Earn coins, unlock vibes and achievements.</li>
-      </ol>
-      <button id="btnStartFromTutorial" class="btn btnPrimary">Start Playing</button>
-    </div>
-  </div>
-
-  <!-- ACHIEVEMENTS -->
-  <div id="achPanel" class="panel hidden" aria-hidden="true">
-    <div class="panelHeader">
-      <div class="panelTitle">Achievements</div>
-      <button id="btnCloseAch" class="panelClose" aria-label="Close">✕</button>
-    </div>
-    <div class="panelBody">
-      <div id="achList" class="achList"></div>
-      <button id="btnAchOk" class="btn btnPrimary">OK</button>
-    </div>
-  </div>
-
-  <!-- SHOP (stub) -->
-  <div id="shopPanel" class="panel hidden" aria-hidden="true">
-    <div class="panelHeader">
-      <div class="panelTitle">Shop</div>
-      <button id="btnCloseShop" class="panelClose" aria-label="Close">✕</button>
-    </div>
-    <div class="panelBody">
-      <div class="shopStub">
-        <div class="shopBig">Coming soon ✨</div>
-        <div class="shopSmall">Skins, trails, vibes, boosters — later. For now: just enjoy.</div>
-      </div>
-      <button id="btnShopOk" class="btn btnPrimary">OK</button>
-    </div>
-  </div>
-
-  <script src="game.js"></script>
+<script src="game.js"></script>
 </body>
 </html>
