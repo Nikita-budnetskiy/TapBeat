@@ -1,120 +1,147 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>TapBeat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
+  <!-- Subtle moving background + stars/confetti -->
+  <div class="bg"></div>
+  <canvas id="particles" aria-hidden="true"></canvas>
 
-<!-- BACKGROUND FX LAYERS -->
-<div class="bg-stars" aria-hidden="true"></div>
-<div class="bg-confetti" aria-hidden="true"></div>
-
-<!-- INTRO -->
-<div id="intro" class="screen active">
-  <div class="intro-card">
-    <h1><span>Nota Bene</span> studio</h1>
-    <p>PRESENTS</p>
-  </div>
-</div>
-
-<!-- MENU -->
-<div id="menu" class="screen">
-  <h1 class="logo">TapBeat</h1>
-  <button id="playBtn" class="main-btn">PLAY</button>
-  <button id="openSettingsFromMenu" class="secondary-btn">SETTINGS</button>
-</div>
-
-<!-- GAME -->
-<div id="game" class="screen">
-  <div class="hud">
-    <div class="hud-item">SCORE <span id="score">0</span></div>
-    <div class="hud-item">COMBO <span id="combo">0</span></div>
-    <div class="hud-item">COINS <span id="coins">0</span></div>
-    <div class="hud-item">BPM <span id="bpm">72</span></div>
-    <div class="hud-item">LV <span id="lvl">1</span></div>
-    <button id="gear" class="gear" aria-label="Settings">⚙️</button>
-  </div>
-
-  <!-- lives (top-right, but separate from HUD so it feels “in the field”) -->
-  <div id="lives" class="lives" aria-label="Lives"></div>
-
-  <!-- Big anime feedback -->
-  <div id="feedback" class="feedback"></div>
-
-  <!-- bottom progress strip -->
-  <div class="bottom-bar">
-    <div class="bar-left">
-      <div class="label">Vibe: <span id="vibe">Verse</span></div>
+  <!-- Intro -->
+  <section id="intro" class="screen show" aria-label="Intro">
+    <div class="glass introCard">
+      <div class="introTitle">Nota Bene studio</div>
+      <div class="introSub">PRESENTS</div>
     </div>
-    <div class="bar-mid">
-      <div class="energy-wrap">
-        <div class="energy-label">Energy</div>
-        <div class="energy-track">
-          <div id="energyFill" class="energy-fill" style="width:0%"></div>
+  </section>
+
+  <!-- Main menu -->
+  <section id="menu" class="screen" aria-label="Menu">
+    <div class="menuWrap">
+      <div class="logo">TapBeat</div>
+
+      <button id="playBtn" class="btn btnPrimary">
+        <span class="btnGlow"></span>
+        PLAY
+      </button>
+
+      <button id="settingsBtn" class="btn btnGhost">SETTINGS</button>
+
+      <div class="hint">Tap in the circle on the beat. Build combo. Earn coins.</div>
+    </div>
+  </section>
+
+  <!-- Game -->
+  <section id="game" class="screen" aria-label="Game">
+    <!-- HUD top -->
+    <header class="hudTop">
+      <div class="pill"><div class="pillLabel">SCORE</div><div id="score" class="pillValue">0</div></div>
+      <div class="pill"><div class="pillLabel">COMBO</div><div id="combo" class="pillValue">0</div></div>
+      <div class="pill"><div class="pillLabel">COINS</div><div id="coins" class="pillValue">0</div></div>
+      <div class="pill"><div class="pillLabel">BPM</div><div id="bpm" class="pillValue">72</div></div>
+      <div class="pill"><div class="pillLabel">LV</div><div id="lvl" class="pillValue">1</div></div>
+
+      <button id="gearBtn" class="gear" aria-label="Settings">⚙︎</button>
+      <div id="hearts" class="hearts" aria-label="Lives"></div>
+    </header>
+
+    <!-- Playfield (fills the screen) -->
+    <main id="field" class="field" aria-label="Playfield">
+      <div id="target" class="target skin-aurora" role="button" aria-label="Target">
+        <div class="ring r1"></div>
+        <div class="ring r2"></div>
+        <div class="core"></div>
+      </div>
+
+      <div id="flybys" class="flybys" aria-hidden="true"></div>
+
+      <!-- Anime feedback (top-left) -->
+      <div id="feedback" class="feedback" aria-live="polite"></div>
+
+      <!-- Screen flash -->
+      <div id="flash" class="flash" aria-hidden="true"></div>
+    </main>
+
+    <!-- HUD bottom -->
+    <footer class="hudBottom">
+      <div class="pill wide">
+        <div class="pillLabel">Vibe</div>
+        <div id="vibe" class="pillValue small">Verse</div>
+      </div>
+
+      <div class="pill energy">
+        <div class="pillLabel">Energy</div>
+        <div class="bar">
+          <div id="energyFill" class="fill"></div>
         </div>
-        <div class="energy-pct"><span id="energyPct">0</span>%</div>
+        <div id="energyPct" class="pillValue small">0%</div>
+      </div>
+
+      <div class="pill wide right">
+        <div class="pillLabel">Streak</div>
+        <div id="streak" class="pillValue small">0</div>
+      </div>
+    </footer>
+  </section>
+
+  <!-- Settings modal -->
+  <div id="modal" class="modal" aria-hidden="true">
+    <div class="glass modalCard" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="modalTop">
+        <div class="modalTitle">Settings</div>
+        <button id="closeModal" class="xBtn" aria-label="Close">✕</button>
+      </div>
+
+      <div class="row">
+        <div class="rowLeft">
+          <div class="rowTitle">Music</div>
+          <div class="rowSub">Synth soundtrack (WebAudio)</div>
+        </div>
+        <label class="switch">
+          <input id="musicToggle" type="checkbox" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="row">
+        <div class="rowLeft">
+          <div class="rowTitle">Vibration</div>
+          <div class="rowSub">Haptic feedback on hit</div>
+        </div>
+        <label class="switch">
+          <input id="vibeToggle" type="checkbox" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="rowBlock">
+        <div class="rowTitle">Target skin</div>
+        <div class="skins">
+          <button class="skinBtn" data-skin="aurora">Aurora</button>
+          <button class="skinBtn" data-skin="candy">Candy</button>
+          <button class="skinBtn" data-skin="sky">Sky</button>
+          <button class="skinBtn" data-skin="lava">Lava</button>
+          <button class="skinBtn" data-skin="mint">Mint</button>
+        </div>
+        <div class="rowSub">You can try all skins anytime.</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="rowBlock">
+        <div class="rowTitle">Achievements</div>
+        <div id="achList" class="achList"></div>
       </div>
     </div>
-    <div class="bar-right">
-      <div class="label">Streak: <span id="streak">0</span></div>
-    </div>
   </div>
 
-  <!-- FIELD -->
-  <div id="field" aria-label="play field">
-    <div id="target" aria-label="tap target">
-      <div class="ring ring1"></div>
-      <div class="ring ring2"></div>
-      <div class="core"></div>
-    </div>
-
-    <div id="particles"></div>
-    <div id="flash"></div>
-    <div id="flybys"></div>
-  </div>
-</div>
-
-<!-- SETTINGS -->
-<div id="settings" class="modal">
-  <div class="modal-card">
-    <div class="modal-head">
-      <h2>Settings</h2>
-      <button id="closeSettings" class="xbtn" aria-label="Close">✕</button>
-    </div>
-
-    <div class="row">
-      <label class="toggle">
-        <input type="checkbox" id="vibrationToggle" checked />
-        <span>Vibration</span>
-      </label>
-
-      <label class="toggle">
-        <input type="checkbox" id="musicToggle" checked />
-        <span>Music</span>
-      </label>
-    </div>
-
-    <div class="row">
-      <label class="slider">
-        <span>Volume</span>
-        <input type="range" id="volume" min="0" max="100" value="70" />
-      </label>
-    </div>
-
-    <div class="section">
-      <h3>Skins (try all)</h3>
-      <div id="skins" class="skins"></div>
-    </div>
-
-    <div class="section small">
-      <p><b>World:</b> Neon Carnival Stage — stars, confetti, fly-by “notes”. Energy unlocks the “Drop”.</p>
-    </div>
-  </div>
-</div>
-
-<script src="game.js"></script>
+  <script src="game.js"></script>
 </body>
 </html>

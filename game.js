@@ -1,957 +1,778 @@
-/* TapBeat — game.js
-   Works with BOTH layouts:
-   A) Old:  #intro #menu #game #field #target + #settings modal + #skins
-   B) New:  #splash #mainMenu #gameUI #gameCanvas + panels (#settingsPanel etc)
+/* =========================
+   TapBeat — "color & fun" build
+   - full-screen playfield
+   - target glides smoothly
+   - must tap inside circle
+   - bigger timing window
+   - combo + streak + energy
+   - 3 lives (hearts)
+   - settings modal (music/vibration/skins)
+   - achievements + save to localStorage
+   - particles background + flyby distractions
+   - WebAudio synth music (no external files)
+   ========================= */
 
-   Fixes:
-   - splash/intro no longer "hangs" if markup differs
-   - wider timing window (leniency)
-   - tap counts anywhere inside the target circle (full area)
-   - smooth target glide
-   - 3 lives (hearts), misses don't restart the whole music/progress
-   - haptics + sound toggles
-   - simple music synth (WebAudio) so "music exists" without files
-   - achievements + localStorage
-*/
+const $ = (id) => document.getElementById(id);
 
-(() => {
-  "use strict";
+// Screens
+const intro = $("intro");
+const menu = $("menu");
+const game = $("game");
 
-  /********************
-   * Helpers
-   ********************/
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+// UI elements
+const playBtn = $("playBtn");
+const settingsBtn = $("settingsBtn");
+const gearBtn = $("gearBtn");
+const modal = $("modal");
+const closeModal = $("closeModal");
+const musicToggle = $("musicToggle");
+const vibeToggle = $("vibeToggle");
+const achList = $("achList");
 
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
+const scoreEl = $("score");
+const comboEl = $("combo");
+const coinsEl = $("coins");
+const bpmEl = $("bpm");
+const lvlEl = $("lvl");
+const heartsEl = $("hearts");
+const vibeEl = $("vibe");
+const energyFill = $("energyFill");
+const energyPct = $("energyPct");
+const streakEl = $("streak");
 
-  const nowMs = () => performance.now();
+const field = $("field");
+const targetEl = $("target");
+const feedbackEl = $("feedback");
+const particlesCanvas = $("particles");
+const flashEl = $("flash");
+const flybys = $("flybys");
 
-  function safeOn(el, ev, fn, opts) {
-    if (!el) return;
-    el.addEventListener(ev, fn, opts);
-  }
+// ------------------------
+// Game state
+// ------------------------
+let playing = false;
 
-  /********************
-   * Detect layout (old vs new)
-   ********************/
-  const layoutOld = {
-    intro: $("#intro"),
-    menu: $("#menu"),
-    game: $("#game"),
-    target: $("#target"),
-    field: $("#field"),
-    feedback: $("#feedback"),
-    lives: $("#lives"),
-    settingsModal: $("#settings"),
-    closeSettings: $("#closeSettings"),
-    gear: $("#gear"),
-    playBtn: $("#playBtn"),
-    openSettingsFromMenu: $("#openSettingsFromMenu"),
-    vibe: $("#vibe"),
-    bpm: $("#bpm"),
-    lvl: $("#lvl"),
-    score: $("#score"),
-    combo: $("#combo"),
-    coins: $("#coins"),
-    energyFill: $("#energyFill"),
-    energyPct: $("#energyPct"),
-    streak: $("#streak"),
-    particles: $("#particles"),
-    flash: $("#flash"),
-    flybys: $("#flybys"),
-    skinsWrap: $("#skins"),
-    vibrationToggle: $("#vibrationToggle"),
-    musicToggle: $("#musicToggle"),
-    volume: $("#volume"),
-  };
+let score = 0;
+let combo = 0;
+let coins = 0;
+let bpm = 72;            // start slower
+let lvl = 1;
+let energy = 0;          // 0..100
+let streak = 0;
 
-  const layoutNew = {
-    splash: $("#splash"),
-    mainMenu: $("#mainMenu"),
-    gameUI: $("#gameUI"),
-    canvas: $("#gameCanvas"),
-    feedback: $("#feedback"),
-    overlayDim: $("#overlayDim"),
-    settingsPanel: $("#settingsPanel"),
-    tutorialPanel: $("#tutorialPanel"),
-    achPanel: $("#achPanel"),
-    shopPanel: $("#shopPanel"),
-    btnPlay: $("#btnPlay"),
-    btnTutorial: $("#btnTutorial"),
-    btnAchievements: $("#btnAchievements"),
-    btnShop: $("#btnShop"),
-    btnGear: $("#btnGear"),
-    btnCloseSettings: $("#btnCloseSettings"),
-    btnResume: $("#btnResume"),
-    btnBackToMenu: $("#btnBackToMenu"),
-    toggleHaptics: $("#toggleHaptics"),
-    toggleSound: $("#toggleSound"),
-    coinsHome: $("#coinsHome"),
-    bestComboHome: $("#bestComboHome"),
-    hudScore: $("#hudScore"),
-    hudCombo: $("#hudCombo"),
-    hudCoins: $("#hudCoins"),
-    hudBpm: $("#hudBpm"),
-    hudLv: $("#hudLv"),
-    hudVibe: $("#hudVibe"),
-    hudEnergy: $("#hudEnergy"),
-    btnCloseTutorial: $("#btnCloseTutorial"),
-    btnStartFromTutorial: $("#btnStartFromTutorial"),
-    btnCloseAch: $("#btnCloseAch"),
-    btnAchOk: $("#btnAchOk"),
-    achList: $("#achList"),
-    btnCloseShop: $("#btnCloseShop"),
-    btnShopOk: $("#btnShopOk"),
-  };
+let lives = 3;
 
-  const isNew = !!layoutNew.splash || !!layoutNew.mainMenu || !!layoutNew.gameUI;
-  const isOld = !!layoutOld.menu || !!layoutOld.game || !!layoutOld.target;
+let vibrationOn = true;
+let musicOn = true;
 
-  // If both exist somehow, prefer old (since your CSS currently targets #target etc).
-  const mode = isOld ? "old" : "new";
+let startedAt = 0;
+let lastBeatTime = 0;
+let beatInterval = 60000 / bpm;
 
-  /********************
-   * Screen / panel control
-   ********************/
-  function showOldScreen(name) {
-    const screens = [layoutOld.intro, layoutOld.menu, layoutOld.game].filter(Boolean);
-    screens.forEach((s) => s.classList.remove("active"));
-    if (name === "intro" && layoutOld.intro) layoutOld.intro.classList.add("active");
-    if (name === "menu" && layoutOld.menu) layoutOld.menu.classList.add("active");
-    if (name === "game" && layoutOld.game) layoutOld.game.classList.add("active");
-  }
+let beatCount = 0;
 
-  function showNewScreen(name) {
-    // new uses "hidden" class
-    const { splash, mainMenu, gameUI } = layoutNew;
-    if (splash) splash.classList.toggle("hidden", name !== "splash");
-    if (mainMenu) mainMenu.classList.toggle("hidden", name !== "menu");
-    if (gameUI) gameUI.classList.toggle("hidden", name !== "game");
+// Timing windows (bigger = easier)
+let HIT_WINDOW_MS = 180;       // overall ok window (±180ms)
+let PERFECT_WINDOW_MS = 70;    // tight window
 
-    if (splash) splash.setAttribute("aria-hidden", name !== "splash" ? "true" : "false");
-    if (mainMenu) mainMenu.setAttribute("aria-hidden", name !== "menu" ? "true" : "false");
-    if (gameUI) gameUI.setAttribute("aria-hidden", name !== "game" ? "true" : "false");
-  }
+// Target movement (glide)
+let target = {
+  x: 0.5,
+  y: 0.58,
+  px: 0.5,
+  py: 0.58,
+  tx: 0.5,
+  ty: 0.58,
+  radiusPx: 90
+};
 
-  function openOldSettings(open) {
-    if (!layoutOld.settingsModal) return;
-    layoutOld.settingsModal.classList.toggle("active", !!open);
-  }
+// Animation
+let raf = 0;
 
-  function openNewPanel(panelEl, open) {
-    if (!panelEl) return;
-    const dim = layoutNew.overlayDim;
-    panelEl.classList.toggle("hidden", !open);
-    panelEl.setAttribute("aria-hidden", open ? "false" : "true");
-    if (dim) {
-      dim.classList.toggle("hidden", !open);
-      dim.setAttribute("aria-hidden", open ? "false" : "true");
-    }
-  }
+// ------------------------
+// Achievements
+// ------------------------
+const ACH = [
+  { id:"firstHit", name:"First Tap", desc:"Land your first hit.", test: () => score > 0 },
+  { id:"firstPerfect", name:"Perfect!", desc:"Get your first PERFECT.", test: () => stats.perfects >= 1 },
+  { id:"combo10", name:"Combo x10", desc:"Reach combo 10.", test: () => stats.maxCombo >= 10 },
+  { id:"combo25", name:"Combo x25", desc:"Reach combo 25.", test: () => stats.maxCombo >= 25 },
+  { id:"survive60", name:"One Minute", desc:"Survive 60 seconds in a run.", test: () => stats.bestTime >= 60 },
+  { id:"coins100", name:"Collector", desc:"Collect 100 coins total.", test: () => stats.totalCoins >= 100 },
+];
 
-  /********************
-   * Persistent state
-   ********************/
-  const STORE_KEY = "tapbeat_save_v1";
-  const ACH_KEY = "tapbeat_ach_v1";
+let unlocked = loadJSON("tapbeat_ach", {});
+let stats = loadJSON("tapbeat_stats", {
+  perfects: 0,
+  greats: 0,
+  misses: 0,
+  maxCombo: 0,
+  bestTime: 0,
+  totalCoins: 0,
+});
 
-  function loadSave() {
-    try {
-      return JSON.parse(localStorage.getItem(STORE_KEY)) || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveSave(obj) {
-    localStorage.setItem(STORE_KEY, JSON.stringify(obj));
-  }
+// ------------------------
+// Music (WebAudio)
+// ------------------------
+let audioCtx = null;
+let master = null;
+let synth = {
+  kick: null,
+  hat: null,
+  chord: null
+};
+let audioReady = false;
+let nextNoteTime = 0;
+let schedulerTimer = 0;
 
-  function loadAch() {
-    try {
-      return JSON.parse(localStorage.getItem(ACH_KEY)) || {};
-    } catch {
-      return {};
-    }
-  }
-  function saveAch(obj) {
-    localStorage.setItem(ACH_KEY, JSON.stringify(obj));
-  }
+function ensureAudio(){
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  master = audioCtx.createGain();
+  master.gain.value = 0.55;
+  master.connect(audioCtx.destination);
+  audioReady = true;
+}
 
-  const save = loadSave();
-  const achUnlocked = loadAch();
+function beepKick(time, intensity=1){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(120, time);
+  o.frequency.exponentialRampToValueAtTime(50, time + 0.06);
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(0.6 * intensity, time + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+  o.connect(g);
+  g.connect(master);
+  o.start(time);
+  o.stop(time + 0.11);
+}
 
-  /********************
-   * Settings
-   ********************/
-  let settings = {
-    haptics: save.haptics ?? true,
-    sound: save.sound ?? true,
-    volume: clamp(save.volume ?? 0.7, 0, 1),
-    skin: save.skin ?? "neo",
-  };
+function beepHat(time, intensity=1){
+  const b = audioCtx.createBufferSource();
+  const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.03, audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * Math.exp(-i/900);
+  b.buffer = buffer;
 
-  function persistSettings() {
-    save.haptics = settings.haptics;
-    save.sound = settings.sound;
-    save.volume = settings.volume;
-    save.skin = settings.skin;
-    saveSave(save);
-  }
+  const f = audioCtx.createBiquadFilter();
+  f.type = "highpass";
+  f.frequency.value = 6000;
 
-  function doHaptic(ms = 20) {
-    if (!settings.haptics) return;
-    // iOS Safari: navigator.vibrate often unsupported; but harmless to call.
-    if (navigator.vibrate) navigator.vibrate(ms);
-  }
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(0.22 * intensity, time + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.03);
 
-  /********************
-   * Skins (CSS variables)
-   ********************/
-  const SKINS = [
-    { id: "neo", name: "Neo Cyan", border: "#2de2e6", glow: "rgba(45,226,230,0.9)", core: "#f72585" },
-    { id: "mint", name: "Mint Pop", border: "#7cff6b", glow: "rgba(124,255,107,0.9)", core: "#2de2e6" },
-    { id: "pink", name: "Candy Pink", border: "#ff2d86", glow: "rgba(255,45,134,0.9)", core: "#ffd166" },
-    { id: "sky", name: "Sky Blue", border: "#4cc9f0", glow: "rgba(76,201,240,0.9)", core: "#ff2d86" },
-    { id: "sun", name: "Sun Gold", border: "#ffd166", glow: "rgba(255,209,102,0.9)", core: "#7cff6b" },
-  ];
+  b.connect(f); f.connect(g); g.connect(master);
+  b.start(time);
+  b.stop(time + 0.035);
+}
 
-  function applySkin(id) {
-    const s = SKINS.find(x => x.id === id) || SKINS[0];
-    document.documentElement.style.setProperty("--skinBorder", s.border);
-    document.documentElement.style.setProperty("--skinGlow", s.glow);
-    document.documentElement.style.setProperty("--skinCore", s.core);
-    settings.skin = s.id;
-    persistSettings();
-  }
-  applySkin(settings.skin);
+function chordPad(time, vibeLevel){
+  // simple triad pad, richer as energy grows
+  const base = 220 * (vibeLevel >= 2 ? 1.122 : 1.0); // A -> Bb-ish
+  const freqs = vibeLevel >= 3 ? [base, base*1.26, base*1.5, base*2] : [base, base*1.26, base*1.5];
 
-  /********************
-   * Achievements
-   ********************/
-  const ACH = [
-    { id: "first_hit", title: "First Hit!", desc: "Land your first GREAT or PERFECT." },
-    { id: "first_perfect", title: "Perfect!", desc: "Get a PERFECT once." },
-    { id: "combo_10", title: "Combo x10", desc: "Reach combo 10." },
-    { id: "combo_25", title: "Combo x25", desc: "Reach combo 25." },
-    { id: "survive_60", title: "Stayin’ Alive", desc: "Play for 60 seconds." },
-    { id: "rich_vibe", title: "Into the Drop", desc: "Fill energy to 100% once." },
-  ];
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(0.12, time + 0.08);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + 0.45);
+  g.connect(master);
 
-  function unlockAch(id) {
-    if (achUnlocked[id]) return;
-    achUnlocked[id] = { t: Date.now() };
-    saveAch(achUnlocked);
-    // show tiny toast using feedback
-    showFeedback("ACHIEVEMENT!", "WOW", 1400);
-    // If new layout, also refresh list if open
-    renderAchList();
-  }
-
-  function renderAchList() {
-    // old layout doesn't have a panel list; new layout has #achList
-    if (!layoutNew.achList) return;
-    const wrap = layoutNew.achList;
-    wrap.innerHTML = "";
-    ACH.forEach(a => {
-      const isOn = !!achUnlocked[a.id];
-      const row = document.createElement("div");
-      row.className = "achRow";
-      row.innerHTML = `
-        <div class="achLeft">
-          <div class="achTitle">${isOn ? "✅" : "⬜️"} ${a.title}</div>
-          <div class="achDesc">${a.desc}</div>
-        </div>
-        <div class="achRight">${isOn ? "Unlocked" : "Locked"}</div>
-      `;
-      wrap.appendChild(row);
-    });
-  }
-
-  /********************
-   * UI pointers (old + new)
-   ********************/
-  // Common score state
-  let coins = save.coins ?? 0;
-  let bestCombo = save.bestCombo ?? 0;
-
-  function persistStats() {
-    save.coins = coins;
-    save.bestCombo = bestCombo;
-    saveSave(save);
-  }
-
-  function setHomeStats() {
-    if (layoutNew.coinsHome) layoutNew.coinsHome.textContent = String(coins);
-    if (layoutNew.bestComboHome) layoutNew.bestComboHome.textContent = String(bestCombo);
-  }
-
-  setHomeStats();
-
-  /********************
-   * Audio (simple synth)
-   ********************/
-  let audioCtx = null;
-  let masterGain = null;
-
-  function ensureAudio() {
-    if (!settings.sound) return;
-    if (audioCtx) return;
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    audioCtx = new Ctx();
-    masterGain = audioCtx.createGain();
-    masterGain.gain.value = settings.volume;
-    masterGain.connect(audioCtx.destination);
-  }
-
-  function setVolume(v01) {
-    settings.volume = clamp(v01, 0, 1);
-    persistSettings();
-    if (masterGain) masterGain.gain.value = settings.volume;
-  }
-
-  function ping(freq, dur = 0.06, type = "sine", gain = 0.25) {
-    if (!settings.sound) return;
-    ensureAudio();
-    if (!audioCtx || !masterGain) return;
-
-    const t = audioCtx.currentTime;
+  freqs.forEach((fq, idx)=>{
     const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = type;
-    o.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.type = idx===0 ? "triangle" : "sine";
+    o.frequency.setValueAtTime(fq, time);
+    o.detune.setValueAtTime((Math.random()*8-4), time);
     o.connect(g);
-    g.connect(masterGain);
-    o.start(t);
-    o.stop(t + dur + 0.02);
+    o.start(time);
+    o.stop(time + 0.5);
+  });
+}
+
+function scheduleAudio(){
+  if (!audioCtx || !musicOn) return;
+
+  const lookahead = 0.12; // seconds
+  while (nextNoteTime < audioCtx.currentTime + lookahead){
+    // beat subdivision
+    const beatPos = (beatCount % 4);
+    const intensity = 0.9 + Math.min(energy/100, 1)*0.4;
+
+    // kick on 1 & 3
+    if (beatPos === 0 || beatPos === 2) beepKick(nextNoteTime, intensity);
+
+    // hats: more as energy grows
+    beepHat(nextNoteTime + (beatInterval/1000)*0.5, 0.8 + intensity*0.4);
+
+    // chords: appear more when energy is higher (vibe progression)
+    const v = getVibe();
+    if (beatPos === 0 && v >= 2) chordPad(nextNoteTime, v);
+
+    nextNoteTime += beatInterval/1000;
+    beatCount++;
+  }
+}
+
+function startMusic(){
+  ensureAudio();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  nextNoteTime = audioCtx.currentTime + 0.05;
+  clearInterval(schedulerTimer);
+  schedulerTimer = setInterval(scheduleAudio, 40);
+}
+function stopMusic(){
+  clearInterval(schedulerTimer);
+  schedulerTimer = 0;
+}
+
+// ------------------------
+// Particles background
+// ------------------------
+const P = { w:0, h:0, stars:[] };
+
+function resize(){
+  // full-screen canvas
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  particlesCanvas.width = Math.floor(window.innerWidth * dpr);
+  particlesCanvas.height = Math.floor(window.innerHeight * dpr);
+  particlesCanvas.style.width = "100%";
+  particlesCanvas.style.height = "100%";
+  P.w = particlesCanvas.width;
+  P.h = particlesCanvas.height;
+  P.dpr = dpr;
+
+  // field height should be truly tall
+  // keep it filling remaining space naturally; CSS has fallback
+  updateTargetRadius();
+}
+window.addEventListener("resize", resize);
+
+function initStars(){
+  P.stars = [];
+  const count = 120;
+  for (let i=0;i<count;i++){
+    P.stars.push({
+      x: Math.random()*P.w,
+      y: Math.random()*P.h,
+      r: (Math.random()*1.6+0.6) * P.dpr,
+      vx: (Math.random()*0.12+0.02) * P.dpr,
+      vy: (Math.random()*0.10+0.02) * P.dpr,
+      a: Math.random()*0.55+0.25,
+      c: ["rgba(255,255,255,0.9)","rgba(68,255,210,0.9)","rgba(76,198,255,0.9)","rgba(255,74,160,0.9)"][Math.floor(Math.random()*4)]
+    });
+  }
+}
+
+function drawStars(){
+  const ctx = particlesCanvas.getContext("2d");
+  ctx.clearRect(0,0,P.w,P.h);
+
+  // subtle bokeh rings
+  for (let i=0;i<6;i++){
+    const x = (0.15 + Math.random()*0.7) * P.w;
+    const y = (0.15 + Math.random()*0.7) * P.h;
+    const rr = (120 + Math.random()*260) * P.dpr;
+    ctx.beginPath();
+    ctx.arc(x,y,rr,0,Math.PI*2);
+    ctx.strokeStyle = `rgba(255,255,255,${0.02 + Math.random()*0.02})`;
+    ctx.lineWidth = 2*P.dpr;
+    ctx.stroke();
   }
 
-  function thump(dur = 0.08, gain = 0.35) {
-    if (!settings.sound) return;
-    ensureAudio();
-    if (!audioCtx || !masterGain) return;
+  // stars/confetti
+  for (const s of P.stars){
+    s.x += s.vx; s.y += s.vy;
+    if (s.x > P.w+40) s.x = -40;
+    if (s.y > P.h+40) s.y = -40;
 
-    const t = audioCtx.currentTime;
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = "sine";
-    o.frequency.setValueAtTime(140, t);
-    o.frequency.exponentialRampToValueAtTime(70, t + dur);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g);
-    g.connect(masterGain);
-    o.start(t);
-    o.stop(t + dur + 0.03);
+    ctx.globalAlpha = s.a;
+    ctx.fillStyle = s.c;
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ------------------------
+// Helpers
+// ------------------------
+function showScreen(el){
+  [intro, menu, game].forEach(s => s.classList.remove("show"));
+  el.classList.add("show");
+}
+
+function setModal(open){
+  if (open){
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden","false");
+  } else {
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden","true");
+  }
+}
+
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+function loadJSON(key, fallback){
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  }catch(e){ return fallback; }
+}
+function saveJSON(key, val){
+  try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){}
+}
+
+function haptic(ms=18){
+  if (!vibrationOn) return;
+  if (navigator.vibrate) navigator.vibrate(ms);
+}
+
+// ------------------------
+// UI update
+// ------------------------
+function renderHearts(){
+  heartsEl.innerHTML = "";
+  for (let i=0;i<3;i++){
+    const d = document.createElement("div");
+    d.className = "heart" + (i < lives ? "" : " off");
+    heartsEl.appendChild(d);
+  }
+}
+
+function setFeedback(text, kind){
+  feedbackEl.className = "feedback show " + kind;
+  feedbackEl.textContent = text;
+  setTimeout(()=> feedbackEl.className = "feedback", 240);
+}
+
+function flash(){
+  flashEl.classList.add("on");
+  setTimeout(()=> flashEl.classList.remove("on"), 90);
+}
+
+function updateHUD(){
+  scoreEl.textContent = score;
+  comboEl.textContent = combo;
+  coinsEl.textContent = coins;
+  bpmEl.textContent = Math.round(bpm);
+  lvlEl.textContent = lvl;
+  streakEl.textContent = streak;
+
+  const e = clamp(energy,0,100);
+  energyFill.style.width = e + "%";
+  energyPct.textContent = Math.round(e) + "%";
+
+  // vibe label
+  const v = getVibe();
+  vibeEl.textContent = v === 1 ? "Verse" : v === 2 ? "Build" : v === 3 ? "Chorus" : "Drop";
+}
+
+function getVibe(){
+  if (energy < 20) return 1;
+  if (energy < 45) return 2;
+  if (energy < 75) return 3;
+  return 4;
+}
+
+function updateTargetRadius(){
+  // based on actual element size
+  const rect = targetEl.getBoundingClientRect();
+  target.radiusPx = rect.width * 0.5;
+}
+
+// ------------------------
+// Movement + timing
+// ------------------------
+function newTargetDestination(){
+  // keep away from edges + HUD
+  const padX = 0.16;
+  const padTop = 0.18;     // avoid top HUD
+  const padBottom = 0.18;  // avoid bottom HUD
+
+  target.tx = padX + Math.random()*(1 - padX*2);
+  target.ty = padTop + Math.random()*(1 - padTop - padBottom);
+
+  // slightly bias towards center early
+  if (lvl === 1 && beatCount < 12){
+    target.tx = 0.45 + (Math.random()*0.2);
+    target.ty = 0.52 + (Math.random()*0.2);
+  }
+}
+
+function tickBeat(nowMs){
+  // move target each beat (destination changes), but actual movement is smoothed in RAF
+  newTargetDestination();
+
+  // difficulty ramp: bpm goes up slowly with streak/energy/time
+  const t = (nowMs - startedAt) / 1000;
+  const ramp = Math.min(1, t / 70);
+  const vibeBoost = getVibe() - 1; // 0..3
+  bpm = 72 + (38*ramp) + (vibeBoost*6) + Math.min(streak*0.35, 10);
+  beatInterval = 60000 / bpm;
+
+  // level changes
+  lvl = 1 + Math.floor((energy + t*0.25) / 25);
+  lvl = clamp(lvl, 1, 9);
+
+  // occasional flyby distractions as level grows
+  if (lvl >= 3 && Math.random() < 0.10 + (lvl-3)*0.02){
+    spawnFlyby();
+  }
+}
+
+function spawnFlyby(){
+  const d = document.createElement("div");
+  d.className = "fly";
+  d.style.setProperty("--y", `${Math.round(40 + Math.random()*(field.clientHeight-120))}px`);
+  d.style.top = "0px"; // real Y via transform variable
+  flybys.appendChild(d);
+  setTimeout(()=> d.remove(), 1200);
+}
+
+// nearest beat time (for judgement)
+function nearestBeatDeltaMs(nowMs){
+  // lastBeatTime is updated; we want nearest beat around now:
+  const dt = nowMs - lastBeatTime;
+  const mod = dt % beatInterval;
+  const prev = mod;
+  const next = beatInterval - mod;
+  // delta to nearest beat (negative means we are after beat by prev ms, positive means before next beat)
+  if (prev <= next) return -prev;
+  return next;
+}
+
+// ------------------------
+// Hit detection (must tap inside circle)
+// ------------------------
+function tapToFieldCoords(clientX, clientY){
+  const r = field.getBoundingClientRect();
+  const x = clientX - r.left;
+  const y = clientY - r.top;
+  return { x, y, w: r.width, h: r.height };
+}
+
+function isInsideTarget(px, py){
+  // target center in field pixels
+  const cx = target.x * field.clientWidth;
+  const cy = target.y * field.clientHeight;
+  const dx = px - cx;
+  const dy = py - cy;
+  const dist = Math.hypot(dx, dy);
+  return dist <= target.radiusPx; // WHOLE CIRCLE counts (as you asked)
+}
+
+function onTap(ev){
+  if (!playing) return;
+
+  const p = ("changedTouches" in ev) ? ev.changedTouches[0] : ev;
+  const { x, y } = tapToFieldCoords(p.clientX, p.clientY);
+
+  // must tap inside
+  if (!isInsideTarget(x, y)){
+    registerMiss("OUT");
+    return;
   }
 
-  /********************
-   * Game state
-   ********************/
-  let running = false;
+  const nowMs = performance.now();
+  const delta = Math.abs(nearestBeatDeltaMs(nowMs));
 
-  // Timing windows (THIS is what you wanted to tweak)
-  // Сделал больше, чтобы "иногда мисс" ушло:
-  const PERFECT_WINDOW_MS = 95;   // было уже (обычно 60-80) — расширили
-  const GREAT_WINDOW_MS   = 175;  // расширили
-  const HIT_WINDOW_MS     = GREAT_WINDOW_MS; // всё что <= GREAT считается попаданием
+  // Timing judgement
+  if (delta <= PERFECT_WINDOW_MS){
+    registerHit("PERFECT", delta);
+  } else if (delta <= HIT_WINDOW_MS){
+    registerHit("GREAT", delta);
+  } else {
+    registerMiss("LATE");
+  }
+}
 
-  // Beat / difficulty
-  let bpm = 88;          // старт медленнее
-  let level = 1;
-  let vibe = "Verse";
-  let energy = 0;        // 0..100
-  let score = 0;
-  let combo = 0;
-  let streak = 0;
+function registerHit(kind){
+  haptic(14);
+  flash();
 
-  // lives
-  const MAX_LIVES = 3;
-  let lives = MAX_LIVES;
+  combo += 1;
+  streak += 1;
 
-  // Beat scheduling
-  let beatIndex = 0;
-  let nextBeatTimeMs = 0;     // in performance.now() ms
-  let beatIntervalMs = 0;
+  // scoring
+  const base = kind === "PERFECT" ? 120 : 80;
+  const mult = 1 + Math.min(combo, 40) * 0.03;
+  score += Math.round(base * mult);
 
-  // Target motion
-  let targetX = 0;
-  let targetY = 0;
-  let targetTX = 0;
-  let targetTY = 0;
-  let targetR = 75;
+  // coins
+  const coinGain = kind === "PERFECT" ? 2 : 1;
+  coins += coinGain;
+  stats.totalCoins += coinGain;
 
-  // RAF loop
-  let rafId = 0;
+  // energy grows; perfect gives more
+  energy += (kind === "PERFECT") ? 6 : 4;
+  energy = clamp(energy, 0, 100);
 
-  /********************
-   * Old layout particle helpers (uses #particles/#flash/#flybys)
-   ********************/
-  function spawnParticles(x, y, kind = "good") {
-    if (!layoutOld.particles) return;
-    const n = kind === "perfect" ? 22 : kind === "good" ? 14 : 10;
-    for (let i = 0; i < n; i++) {
-      const p = document.createElement("div");
-      p.className = "p";
-      const ang = Math.random() * Math.PI * 2;
-      const dist = (kind === "perfect" ? 90 : 60) * (0.4 + Math.random() * 0.8);
-      const dx = Math.cos(ang) * dist;
-      const dy = Math.sin(ang) * dist;
-      p.style.left = `${x}px`;
-      p.style.top = `${y}px`;
-      p.style.setProperty("--dx", `${dx}px`);
-      p.style.setProperty("--dy", `${dy}px`);
-      // color via inline
-      const c = kind === "perfect" ? "rgba(124,255,107,0.95)" : kind === "good" ? "rgba(45,226,230,0.95)" : "rgba(255,45,134,0.95)";
-      p.style.background = c;
-      layoutOld.particles.appendChild(p);
-      setTimeout(() => p.remove(), 700);
+  // feedback
+  if (kind === "PERFECT"){
+    stats.perfects += 1;
+    setFeedback("PERFECT!", "fbPerfect");
+  } else {
+    stats.greats += 1;
+    setFeedback("GREAT!", "fbGreat");
+  }
+
+  // update max combo
+  stats.maxCombo = Math.max(stats.maxCombo, combo);
+
+  updateHUD();
+  checkAchievements();
+}
+
+function registerMiss(reason){
+  stats.misses += 1;
+
+  // combo breaks, but streak/energy/lives give player room
+  combo = 0;
+  streak = Math.max(0, streak - 2);
+  energy = Math.max(0, energy - 12);
+
+  lives -= 1;
+  renderHearts();
+
+  setFeedback("MISS!", "fbMiss");
+  haptic(25);
+
+  updateHUD();
+  checkAchievements();
+
+  if (lives <= 0){
+    endRun();
+  }
+}
+
+// ------------------------
+// Run lifecycle
+// ------------------------
+function resetRun(){
+  score = 0;
+  combo = 0;
+  coins = 0;
+  bpm = 72;
+  lvl = 1;
+  energy = 0;
+  streak = 0;
+  lives = 3;
+
+  beatCount = 0;
+  beatInterval = 60000 / bpm;
+
+  target.x = 0.5; target.y = 0.58;
+  target.px = target.x; target.py = target.y;
+  target.tx = target.x; target.ty = target.y;
+
+  renderHearts();
+  updateHUD();
+}
+
+function startRun(){
+  resetRun();
+
+  playing = true;
+  showScreen(game);
+
+  startedAt = performance.now();
+  lastBeatTime = startedAt;
+  newTargetDestination();
+
+  // audio must be started by user gesture; Play button qualifies
+  if (musicOn){
+    startMusic();
+  }
+
+  // pointer handlers
+  field.addEventListener("pointerdown", onTap, { passive:true });
+  field.addEventListener("touchstart", onTap, { passive:true });
+
+  // start loop
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(loop);
+}
+
+function endRun(){
+  playing = false;
+
+  // clean listeners
+  field.removeEventListener("pointerdown", onTap);
+  field.removeEventListener("touchstart", onTap);
+
+  stopMusic();
+
+  // update best time
+  const t = (performance.now() - startedAt) / 1000;
+  stats.bestTime = Math.max(stats.bestTime, Math.floor(t));
+  saveJSON("tapbeat_stats", stats);
+  saveJSON("tapbeat_ach", unlocked);
+
+  // simple back to menu
+  setTimeout(()=>{
+    showScreen(menu);
+  }, 450);
+}
+
+// ------------------------
+// Animation loop
+// ------------------------
+function loop(now){
+  if (!playing) return;
+
+  // beat tick (based on time, not frames)
+  const dt = now - lastBeatTime;
+  if (dt >= beatInterval){
+    // catch up if lag
+    const steps = Math.floor(dt / beatInterval);
+    lastBeatTime += steps * beatInterval;
+    tickBeat(now);
+  }
+
+  // smooth target glide to new destination
+  const glide = 0.08 + Math.min(energy/100, 1)*0.07; // more energy = snappier
+  target.px += (target.tx - target.px) * glide;
+  target.py += (target.ty - target.py) * glide;
+
+  target.x = target.px;
+  target.y = target.py;
+
+  // apply position
+  const left = target.x * field.clientWidth;
+  const top  = target.y * field.clientHeight;
+  targetEl.style.left = left + "px";
+  targetEl.style.top  = top + "px";
+
+  // energy decay (slow)
+  energy = Math.max(0, energy - 0.018);
+  updateHUD();
+
+  // draw particles bg
+  drawStars();
+
+  // achievements time
+  const t = (now - startedAt) / 1000;
+  stats.bestTime = Math.max(stats.bestTime, Math.floor(t));
+
+  raf = requestAnimationFrame(loop);
+}
+
+// ------------------------
+// Achievements UI + unlock
+// ------------------------
+function checkAchievements(){
+  let changed = false;
+  for (const a of ACH){
+    if (!unlocked[a.id] && a.test()){
+      unlocked[a.id] = true;
+      changed = true;
+      // little reward
+      coins += 25;
+      stats.totalCoins += 25;
+      setFeedback("ACHIEVED!", "fbGreat");
+      flash();
     }
   }
-
-  function flashOn() {
-    if (!layoutOld.flash) return;
-    layoutOld.flash.classList.remove("on");
-    // force reflow
-    void layoutOld.flash.offsetWidth;
-    layoutOld.flash.classList.add("on");
-  }
-
-  function spawnFlyby() {
-    if (!layoutOld.flybys) return;
-    const f = document.createElement("div");
-    f.className = "fly";
-    f.style.top = `${10 + Math.random() * 40}vh`;
-    layoutOld.flybys.appendChild(f);
-    setTimeout(() => f.remove(), 1400);
-  }
-
-  /********************
-   * Feedback text (anime-ish)
-   ********************/
-  let feedbackTimer = 0;
-  function showFeedback(text, style = "GREAT", ms = 520) {
-    const el = (mode === "old") ? layoutOld.feedback : layoutNew.feedback;
-    if (!el) return;
-
-    el.textContent = `${text}`;
-    el.classList.remove("f-miss", "f-good", "f-perfect", "f-wow");
-    if (style === "MISS") el.classList.add("f-miss");
-    if (style === "GREAT") el.classList.add("f-good");
-    if (style === "PERFECT") el.classList.add("f-perfect");
-    if (style === "WOW") el.classList.add("f-wow");
-
-    el.classList.remove("pop");
-    void el.offsetWidth;
-    el.classList.add("pop");
-
-    clearTimeout(feedbackTimer);
-    feedbackTimer = setTimeout(() => {
-      el.classList.remove("pop");
-      el.textContent = "";
-    }, ms);
-  }
-
-  /********************
-   * UI updates
-   ********************/
-  function renderLives() {
-    if (!layoutOld.lives) return;
-    layoutOld.lives.innerHTML = "";
-    for (let i = 0; i < MAX_LIVES; i++) {
-      const img = document.createElement("div");
-      img.className = "heart" + (i < lives ? "" : " off");
-      // Pure CSS heart via background (no files)
-      img.style.background =
-        "radial-gradient(circle at 30% 35%, #fff 0 20%, transparent 21%)," +
-        "radial-gradient(circle at 70% 35%, #fff 0 20%, transparent 21%)," +
-        "conic-gradient(from 220deg, transparent 0 40deg, #ff2d86 40deg 320deg, transparent 320deg 360deg)";
-      img.style.borderRadius = "8px";
-      img.style.boxShadow = "0 10px 18px rgba(0,0,0,0.25)";
-      layoutOld.lives.appendChild(img);
-    }
-  }
-
-  function updateHUD() {
-    if (mode === "old") {
-      if (layoutOld.score) layoutOld.score.textContent = String(score);
-      if (layoutOld.combo) layoutOld.combo.textContent = String(combo);
-      if (layoutOld.coins) layoutOld.coins.textContent = String(coins);
-      if (layoutOld.bpm) layoutOld.bpm.textContent = String(Math.round(bpm));
-      if (layoutOld.lvl) layoutOld.lvl.textContent = String(level);
-      if (layoutOld.vibe) layoutOld.vibe.textContent = vibe;
-      if (layoutOld.energyFill) layoutOld.energyFill.style.width = `${energy}%`;
-      if (layoutOld.energyPct) layoutOld.energyPct.textContent = String(Math.round(energy));
-      if (layoutOld.streak) layoutOld.streak.textContent = String(streak);
-      renderLives();
-    } else {
-      if (layoutNew.hudScore) layoutNew.hudScore.textContent = String(score);
-      if (layoutNew.hudCombo) layoutNew.hudCombo.textContent = String(combo);
-      if (layoutNew.hudCoins) layoutNew.hudCoins.textContent = String(coins);
-      if (layoutNew.hudBpm) layoutNew.hudBpm.textContent = String(Math.round(bpm));
-      if (layoutNew.hudLv) layoutNew.hudLv.textContent = String(level);
-      if (layoutNew.hudVibe) layoutNew.hudVibe.textContent = vibe;
-      if (layoutNew.hudEnergy) layoutNew.hudEnergy.textContent = `${Math.round(energy)}%`;
-    }
-  }
-
-  /********************
-   * Target positioning (OLD layout)
-   ********************/
-  function resizeTargetRadius() {
-    if (!layoutOld.target) return;
-    const rect = layoutOld.target.getBoundingClientRect();
-    targetR = Math.min(rect.width, rect.height) / 2;
-  }
-
-  function setTargetPos(x, y) {
-    if (!layoutOld.target) return;
-    layoutOld.target.style.transform = `translate(${x - targetR}px, ${y - targetR}px)`;
-  }
-
-  function pickNewTarget() {
-    if (!layoutOld.field) return;
-
-    const fr = layoutOld.field.getBoundingClientRect();
-    const pad = 90;
-    targetTX = fr.left + pad + Math.random() * (fr.width - pad * 2);
-    targetTY = fr.top + pad + Math.random() * (fr.height - pad * 2);
-  }
-
-  /********************
-   * Hit detection (full area of circle)
-   ********************/
-  function isPointInTarget(clientX, clientY) {
-    if (!layoutOld.target) return false;
-    const r = layoutOld.target.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const dx = clientX - cx;
-    const dy = clientY - cy;
-    return (dx * dx + dy * dy) <= (targetR * targetR);
-  }
-
-  /********************
-   * Beat / scoring
-   ********************/
-  function resetRun() {
-    running = false;
-
-    bpm = 88;
-    level = 1;
-    vibe = "Verse";
-    energy = 0;
-    score = 0;
-    combo = 0;
-    streak = 0;
-    lives = MAX_LIVES;
-
-    beatIndex = 0;
-    beatIntervalMs = (60_000 / bpm);
-    nextBeatTimeMs = nowMs() + 900; // старт чуть медленнее, чтобы не "сразу"
-    pickNewTarget();
-
+  if (changed){
+    saveJSON("tapbeat_ach", unlocked);
+    saveJSON("tapbeat_stats", stats);
+    renderAchievements();
     updateHUD();
   }
+}
 
-  function calcDifficulty() {
-    // BPM grows with combo, but not crazy
-    const base = 88;
-    const add = Math.min(52, combo * 1.1);
-    bpm = base + add;
-
-    // level rises every ~12 combo
-    level = 1 + Math.floor(combo / 12);
-
-    // vibe progression using energy
-    if (energy < 35) vibe = "Verse";
-    else if (energy < 70) vibe = "Build";
-    else if (energy < 100) vibe = "Chorus";
-    else vibe = "DROP";
+function renderAchievements(){
+  achList.innerHTML = "";
+  for (const a of ACH){
+    const div = document.createElement("div");
+    const isOn = !!unlocked[a.id];
+    div.className = "ach" + (isOn ? " unlocked" : "");
+    div.innerHTML = `
+      <div class="achTop">
+        <div class="achName">${a.name}</div>
+        <div class="achState">${isOn ? "UNLOCKED ✓" : "LOCKED"}</div>
+      </div>
+      <div class="achDesc">${a.desc}</div>
+    `;
+    achList.appendChild(div);
   }
+}
 
-  function awardCoins(amount) {
-    coins += amount;
-    persistStats();
-    setHomeStats();
-  }
+// ------------------------
+// Settings (skins + toggles)
+// ------------------------
+function applySkin(name){
+  const all = ["aurora","candy","sky","lava","mint"];
+  all.forEach(s => targetEl.classList.remove("skin-"+s));
+  targetEl.classList.add("skin-"+name);
 
-  function onHit(kind) {
-    // kind: "perfect" | "good"
-    if (kind === "perfect") {
-      score += 180 + combo * 2;
-      combo += 1;
-      streak += 1;
-      energy = clamp(energy + 6, 0, 100);
-      awardCoins(2);
-      doHaptic(18);
-      ping(880, 0.05, "triangle", 0.22);
-      ping(1320, 0.05, "sine", 0.12);
-      showFeedback("PERFECT!", "PERFECT", 520);
-      unlockAch("first_perfect");
-    } else {
-      score += 110 + combo;
-      combo += 1;
-      streak += 1;
-      energy = clamp(energy + 3.5, 0, 100);
-      awardCoins(1);
-      doHaptic(12);
-      ping(660, 0.05, "triangle", 0.18);
-      showFeedback("GREAT!", "GREAT", 480);
-    }
+  document.querySelectorAll(".skinBtn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.skin === name);
+  });
 
-    if (combo === 1) unlockAch("first_hit");
-    if (combo === 10) unlockAch("combo_10");
-    if (combo === 25) unlockAch("combo_25");
-    if (energy >= 100) unlockAch("rich_vibe");
+  saveJSON("tapbeat_skin", { skin:name });
+}
 
-    bestCombo = Math.max(bestCombo, combo);
-    persistStats();
-    setHomeStats();
+function loadSkin(){
+  const saved = loadJSON("tapbeat_skin", { skin:"aurora" });
+  applySkin(saved.skin || "aurora");
+}
 
-    // Old layout FX
-    if (mode === "old") {
-      const tr = layoutOld.target.getBoundingClientRect();
-      const cx = tr.left + tr.width / 2;
-      const cy = tr.top + tr.height / 2;
-      spawnParticles(cx, cy, kind === "perfect" ? "perfect" : "good");
-      flashOn();
-      if (Math.random() < 0.28) spawnFlyby();
-      layoutOld.target.classList.remove("pulse");
-      void layoutOld.target.offsetWidth;
-      layoutOld.target.classList.add("pulse");
-    }
+function wireSettings(){
+  gearBtn.addEventListener("click", ()=> setModal(true));
+  settingsBtn.addEventListener("click", ()=> setModal(true));
+  closeModal.addEventListener("click", ()=> setModal(false));
+  modal.addEventListener("click", (e)=> {
+    if (e.target === modal) setModal(false);
+  });
 
-    // After some hits, gently speed up scheduler
-    calcDifficulty();
-    beatIntervalMs = (60_000 / bpm);
+  musicToggle.addEventListener("change", ()=>{
+    musicOn = musicToggle.checked;
+    if (!musicOn) stopMusic();
+    if (musicOn && playing) startMusic();
+  });
 
-    updateHUD();
-    pickNewTarget();
-  }
+  vibeToggle.addEventListener("change", ()=>{
+    vibrationOn = vibeToggle.checked;
+  });
 
-  function onMiss() {
-    // Important: do NOT restart whole music/progress — just penalty
-    lives = Math.max(0, lives - 1);
-    combo = 0;
-    streak = 0;
-    energy = clamp(energy - 10, 0, 100);
+  document.querySelectorAll(".skinBtn").forEach(btn=>{
+    btn.addEventListener("click", ()=> applySkin(btn.dataset.skin));
+  });
+}
 
-    doHaptic(35);
-    thump(0.08, 0.38);
-    showFeedback("MISS!", "MISS", 560);
+// ------------------------
+// Boot
+// ------------------------
+function boot(){
+  resize();
+  initStars();
+  renderHearts();
+  renderAchievements();
+  loadSkin();
+  wireSettings();
 
-    updateHUD();
+  // Intro → Menu
+  showScreen(intro);
+  setTimeout(()=> showScreen(menu), 1400);
 
-    if (lives <= 0) {
-      // Game over → back to menu
-      running = false;
-      cancelAnimationFrame(rafId);
+  playBtn.addEventListener("click", ()=>{
+    // audio requires gesture; do it here
+    if (musicOn) startMusic();
+    startRun();
+  });
 
-      // small delay so player sees miss/game over feel
-      setTimeout(() => {
-        if (mode === "old") showOldScreen("menu");
-        else showNewScreen("menu");
-      }, 450);
-    }
-  }
+  // defaults
+  musicOn = musicToggle.checked;
+  vibrationOn = vibeToggle.checked;
 
-  function judgeTap(tapMs) {
-    // Find nearest beat time.
-    // We'll judge against nextBeatTimeMs and previous beat too, so taps slightly early/late are OK.
-    const prev = nextBeatTimeMs - beatIntervalMs;
-    const d1 = Math.abs(tapMs - prev);
-    const d2 = Math.abs(tapMs - nextBeatTimeMs);
-    const d = Math.min(d1, d2);
-
-    if (d <= PERFECT_WINDOW_MS) return "perfect";
-    if (d <= GREAT_WINDOW_MS) return "good";
-    return "miss";
-  }
-
-  /********************
-   * Game loop (OLD layout)
-   ********************/
-  function step() {
-    if (!running) return;
-
-    const t = nowMs();
-
-    // Advance beat schedule
-    while (t >= nextBeatTimeMs) {
-      // beat tick sound varies by vibe (richer later)
-      if (settings.sound) {
-        if (vibe === "Verse") ping(220, 0.04, "sine", 0.10);
-        else if (vibe === "Build") { ping(220, 0.04, "sine", 0.11); ping(440, 0.04, "triangle", 0.08); }
-        else if (vibe === "Chorus") { ping(330, 0.04, "triangle", 0.12); ping(660, 0.04, "sine", 0.10); }
-        else { ping(440, 0.04, "sawtooth", 0.12); ping(880, 0.04, "triangle", 0.10); ping(1320, 0.03, "sine", 0.07); }
-      }
-
-      beatIndex++;
-      nextBeatTimeMs += beatIntervalMs;
-
-      // passive energy decay
-      energy = clamp(energy - 0.25, 0, 100);
-      updateHUD();
-    }
-
-    // Smooth glide target toward targetTX/TY
-    if (mode === "old") {
-      if (!layoutOld.field || !layoutOld.target) {
-        // if markup changed mid-flight
-        running = false;
-        return;
-      }
-
-      // on first frame ensure sizes
-      resizeTargetRadius();
-
-      // current position in screen coords
-      if (targetX === 0 && targetY === 0) {
-        const fr = layoutOld.field.getBoundingClientRect();
-        targetX = fr.left + fr.width * 0.5;
-        targetY = fr.top + fr.height * 0.5;
-        targetTX = targetX;
-        targetTY = targetY;
-      }
-
-      // glide
-      const glide = 0.08; // smooth, not jerky
-      targetX = lerp(targetX, targetTX, glide);
-      targetY = lerp(targetY, targetTY, glide);
-
-      setTargetPos(targetX, targetY);
-    }
-
-    rafId = requestAnimationFrame(step);
-  }
-
-  /********************
-   * Input (OLD layout: tap must be inside target)
-   ********************/
-  function onPointerDown(e) {
-    if (!running) return;
-    // If settings open — ignore
-    if (mode === "old" && layoutOld.settingsModal?.classList.contains("active")) return;
-
-    const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
-    const inside = isPointInTarget(pt.clientX, pt.clientY);
-
-    if (!inside) {
-      onMiss();
-      return;
-    }
-
-    const res = judgeTap(nowMs());
-    if (res === "perfect") onHit("perfect");
-    else if (res === "good") onHit("good");
-    else onMiss();
-  }
-
-  /********************
-   * Skins UI (OLD settings modal)
-   ********************/
-  function buildSkinsUI() {
-    if (!layoutOld.skinsWrap) return;
-    layoutOld.skinsWrap.innerHTML = "";
-
-    SKINS.forEach(s => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "skinBtn";
-      b.textContent = s.name;
-      b.style.border = `2px solid ${s.border}`;
-      b.style.background = "rgba(255,255,255,0.06)";
-      b.style.color = "#fff";
-      b.style.padding = "10px 12px";
-      b.style.borderRadius = "14px";
-      b.style.cursor = "pointer";
-      b.style.margin = "6px 8px 0 0";
-      b.onclick = () => applySkin(s.id);
-      layoutOld.skinsWrap.appendChild(b);
-    });
-  }
-
-  /********************
-   * Wiring: OLD layout
-   ********************/
-  function initOld() {
-    buildSkinsUI();
-
-    // Set toggles
-    if (layoutOld.vibrationToggle) layoutOld.vibrationToggle.checked = settings.haptics;
-    if (layoutOld.musicToggle) layoutOld.musicToggle.checked = settings.sound;
-    if (layoutOld.volume) layoutOld.volume.value = String(Math.round(settings.volume * 100));
-
-    safeOn(layoutOld.vibrationToggle, "change", (e) => {
-      settings.haptics = !!e.target.checked;
-      persistSettings();
-      doHaptic(20);
-    });
-
-    safeOn(layoutOld.musicToggle, "change", (e) => {
-      settings.sound = !!e.target.checked;
-      persistSettings();
-      if (settings.sound) ensureAudio();
-    });
-
-    safeOn(layoutOld.volume, "input", (e) => {
-      const v = Number(e.target.value) / 100;
-      setVolume(v);
-    });
-
-    // intro -> menu
-    showOldScreen("intro");
-    setTimeout(() => showOldScreen("menu"), 1200);
-
-    // play
-    safeOn(layoutOld.playBtn, "click", async () => {
-      ensureAudio();
-      // iOS needs user gesture to start audio context
-      if (audioCtx && audioCtx.state === "suspended") {
-        try { await audioCtx.resume(); } catch {}
-      }
-
-      resetRun();
-      showOldScreen("game");
-      running = true;
-      // schedule from "now"
-      nextBeatTimeMs = nowMs() + 900;
-      rafId = requestAnimationFrame(step);
-    });
-
-    // settings
-    safeOn(layoutOld.openSettingsFromMenu, "click", () => openOldSettings(true));
-    safeOn(layoutOld.gear, "click", () => openOldSettings(true));
-    safeOn(layoutOld.closeSettings, "click", () => openOldSettings(false));
-
-    // tap handler on whole document for reliability, but we check circle area anyway
-    safeOn(document, "pointerdown", onPointerDown, { passive: true });
-    safeOn(document, "touchstart", onPointerDown, { passive: true });
-
-    updateHUD();
-    renderLives();
-
-    // survive achievement timer
-    let startMs = 0;
-    setInterval(() => {
-      if (!running) { startMs = 0; return; }
-      if (!startMs) startMs = nowMs();
-      if (nowMs() - startMs >= 60_000) unlockAch("survive_60");
-    }, 1000);
-  }
-
-  /********************
-   * Wiring: NEW layout (fallback)
-   * (If you later switch to canvas version again, you won't "hang")
-   ********************/
-  function initNew() {
-    // sync toggles
-    if (layoutNew.toggleHaptics) layoutNew.toggleHaptics.checked = settings.haptics;
-    if (layoutNew.toggleSound) layoutNew.toggleSound.checked = settings.sound;
-
-    safeOn(layoutNew.toggleHaptics, "change", (e) => {
-      settings.haptics = !!e.target.checked;
-      persistSettings();
-      doHaptic(20);
-    });
-
-    safeOn(layoutNew.toggleSound, "change", (e) => {
-      settings.sound = !!e.target.checked;
-      persistSettings();
-      if (settings.sound) ensureAudio();
-    });
-
-    function closeAllPanels() {
-      openNewPanel(layoutNew.settingsPanel, false);
-      openNewPanel(layoutNew.tutorialPanel, false);
-      openNewPanel(layoutNew.achPanel, false);
-      openNewPanel(layoutNew.shopPanel, false);
-    }
-
-    // splash -> menu
-    showNewScreen("splash");
-    setTimeout(() => showNewScreen("menu"), 1200);
-
-    safeOn(layoutNew.btnPlay, "click", async () => {
-      ensureAudio();
-      if (audioCtx && audioCtx.state === "suspended") {
-        try { await audioCtx.resume(); } catch {}
-      }
-      resetRun();
-      showNewScreen("game");
-      running = true;
-      nextBeatTimeMs = nowMs() + 900;
-      rafId = requestAnimationFrame(step); // step only moves target if old; new just runs beats/HUD
-    });
-
-    safeOn(layoutNew.btnGear, "click", () => openNewPanel(layoutNew.settingsPanel, true));
-    safeOn(layoutNew.btnCloseSettings, "click", () => openNewPanel(layoutNew.settingsPanel, false));
-    safeOn(layoutNew.btnResume, "click", () => openNewPanel(layoutNew.settingsPanel, false));
-    safeOn(layoutNew.btnBackToMenu, "click", () => {
-      running = false;
-      cancelAnimationFrame(rafId);
-      closeAllPanels();
-      showNewScreen("menu");
-    });
-
-    safeOn(layoutNew.btnTutorial, "click", () => openNewPanel(layoutNew.tutorialPanel, true));
-    safeOn(layoutNew.btnCloseTutorial, "click", () => openNewPanel(layoutNew.tutorialPanel, false));
-    safeOn(layoutNew.btnStartFromTutorial, "click", async () => {
-      openNewPanel(layoutNew.tutorialPanel, false);
-      ensureAudio();
-      if (audioCtx && audioCtx.state === "suspended") {
-        try { await audioCtx.resume(); } catch {}
-      }
-      resetRun();
-      showNewScreen("game");
-      running = true;
-      nextBeatTimeMs = nowMs() + 900;
-      rafId = requestAnimationFrame(step);
-    });
-
-    safeOn(layoutNew.btnAchievements, "click", () => {
-      renderAchList();
-      openNewPanel(layoutNew.achPanel, true);
-    });
-    safeOn(layoutNew.btnCloseAch, "click", () => openNewPanel(layoutNew.achPanel, false));
-    safeOn(layoutNew.btnAchOk, "click", () => openNewPanel(layoutNew.achPanel, false));
-
-    safeOn(layoutNew.btnShop, "click", () => openNewPanel(layoutNew.shopPanel, true));
-    safeOn(layoutNew.btnCloseShop, "click", () => openNewPanel(layoutNew.shopPanel, false));
-    safeOn(layoutNew.btnShopOk, "click", () => openNewPanel(layoutNew.shopPanel, false));
-
-    // For new layout we don't know your canvas gameplay yet;
-    // but at least it won't hang and menus/settings will work.
-    updateHUD();
-    setHomeStats();
-  }
-
-  /********************
-   * Boot
-   ********************/
-  // If you accidentally have mismatched HTML/CSS, at least don't hard-crash:
-  try {
-    if (mode === "old") initOld();
-    else initNew();
-  } catch (e) {
-    console.error("TapBeat init error:", e);
-    // Fallback: show whichever menu exists
-    if (layoutOld.menu) showOldScreen("menu");
-    if (layoutNew.mainMenu) showNewScreen("menu");
-  }
-
-  /********************
-   * IMPORTANT: where to tweak leniency (what you asked)
-   ********************
-   * PERFECT_WINDOW_MS / GREAT_WINDOW_MS at top of game state.
-   * Increase GREAT_WINDOW_MS if you still see random MISS while on beat.
-   * Example: change GREAT_WINDOW_MS from 175 to 210.
-   */
-})();
+  // update radius after first paint
+  setTimeout(updateTargetRadius, 120);
+}
+boot();
