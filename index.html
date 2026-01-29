@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b10" />
+  <title>TAPBEAT</title>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <div class="app" id="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">TAPBEAT</span>
+        <span class="tag">one finger • pure timing</span>
+      </div>
+
+      <button class="icon-btn" id="btnPause" aria-label="Pause">
+        <span class="icon">Ⅱ</span>
+      </button>
+    </header>
+
+    <main class="stage" id="stage" aria-label="Game stage">
+      <div class="hud">
+        <div class="hud-left">
+          <div class="stat">
+            <div class="label">SCORE</div>
+            <div class="value" id="score">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">COMBO</div>
+            <div class="value" id="combo">0</div>
+          </div>
+        </div>
+
+        <div class="hud-right">
+          <div class="stat small">
+            <div class="label">BPM</div>
+            <div class="value" id="bpm">128</div>
+          </div>
+          <div class="stat small">
+            <div class="label">LVL</div>
+            <div class="value" id="lvl">1</div>
+          </div>
+        </div>
+      </div>
+
+      <section class="target-wrap" aria-label="Tap target">
+        <div class="target" id="target">
+          <div class="ring ring-outer" id="ringOuter"></div>
+          <div class="ring ring-inner" id="ringInner"></div>
+
+          <div class="core">
+            <div class="core-dot"></div>
+            <div class="core-text">
+              <div class="hint" id="hint">TAP ON THE BEAT</div>
+              <div class="judgement" id="judge"> </div>
+            </div>
+          </div>
+
+          <div class="sweet" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="progress">
+          <div class="bar" id="bar"></div>
+        </div>
+        <div class="footer-row">
+          <div class="mini">Hit streak builds the track.</div>
+          <div class="mini" id="trackState">Track: Kick</div>
+        </div>
+      </footer>
+    </main>
+
+    <!-- START SCREEN -->
+    <div class="overlay" id="startOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h1>TAPBEAT</h1>
+        <p class="lead">
+          One target. One finger. Tap when the ring hits the sweet spot.
+          Build combo to unlock more layers.
+        </p>
+
+        <div class="row">
+          <div class="pill">
+            <div class="pill-label">Mode</div>
+            <select id="modeSelect" class="select">
+              <option value="classic" selected>Classic</option>
+              <option value="drift">Drift (hard)</option>
+            </select>
+          </div>
+
+          <div class="pill">
+            <div class="pill-label">BPM</div>
+            <select id="bpmSelect" class="select">
+              <option value="124">124</option>
+              <option value="128" selected>128</option>
+              <option value="132">132</option>
+              <option value="138">138</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="toggle">
+            <input type="checkbox" id="haptics" checked />
+            <span>Haptics</span>
+          </label>
+
+          <label class="toggle">
+            <input type="checkbox" id="sound" checked />
+            <span>Sound</span>
+          </label>
+        </div>
+
+        <button class="primary" id="btnStart">Start</button>
+
+        <p class="fine">
+          Tip: On iPhone, sound starts after you press <b>Start</b> (browser rule).
+        </p>
+      </div>
+    </div>
+
+    <!-- PAUSE -->
+    <div class="overlay hidden" id="pauseOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Paused</h2>
+        <div class="row">
+          <button class="secondary" id="btnResume">Resume</button>
+          <button class="ghost" id="btnRestart">Restart</button>
+        </div>
+        <p class="fine">
+          Pro tip: “Perfect” is a tight window. Learn the pulse, don’t chase the ring.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
