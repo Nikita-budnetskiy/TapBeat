@@ -155,19 +155,22 @@ body{
 
 /* Game layout */
 #game{
-  grid-template-rows: auto 1fr auto;
-  align-items:stretch;
-  justify-items:stretch;
+  display:flex;
+  flex-direction:column;
   gap:12px;
+  height: 100dvh; /* важно для iOS Safari */
+  min-height: 100vh;
 }
 
 .hudTop{
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   gap:10px;
-  flex-wrap:wrap;
-  position:relative;
+  flex-wrap:nowrap;              /* НЕ переносить */
+  overflow:hidden;               /* если не влезло — не ломаем layout */
   padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 .pill{
@@ -230,8 +233,8 @@ body{
 .field{
   position:relative;
   width:100%;
-  height: calc(100vh - 220px); /* fallback; JS also resizes particles */
-  min-height: 420px;
+  flex: 1 1 auto;               /* поле занимает всё свободное место */
+  min-height: 0;                /* важно для flex, чтобы не “распирало” */
   border-radius: 26px;
   background: rgba(0,0,0,0.14);
   border: 1px solid rgba(255,255,255,0.12);
