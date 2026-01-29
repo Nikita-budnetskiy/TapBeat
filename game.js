@@ -1,632 +1,957 @@
-/* =========================
-   TapBeat — upgraded
-   - slower start (BPM 72 + ramp)
-   - correct hit judgement (nearest beat, not only lastBeat)
-   - pointer events (mobile reliable)
-   - 3 lives + hearts
-   - energy system (music + difficulty doesn't reset on 1 miss)
-   - anime feedback + fx sprites (CSS)
-   - flyby distractions as progress grows
-   ========================= */
+/* TapBeat — game.js
+   Works with BOTH layouts:
+   A) Old:  #intro #menu #game #field #target + #settings modal + #skins
+   B) New:  #splash #mainMenu #gameUI #gameCanvas + panels (#settingsPanel etc)
 
-let score = 0;
-let combo = 0;
-let coins = 0;
-let bpm = 72;
-let lvl = 1;
+   Fixes:
+   - splash/intro no longer "hangs" if markup differs
+   - wider timing window (leniency)
+   - tap counts anywhere inside the target circle (full area)
+   - smooth target glide
+   - 3 lives (hearts), misses don't restart the whole music/progress
+   - haptics + sound toggles
+   - simple music synth (WebAudio) so "music exists" without files
+   - achievements + localStorage
+*/
 
-let playing = false;
-let vibrationOn = true;
-let musicOn = true;
+(() => {
+  "use strict";
 
-let lives = 3;
-let streak = 0;          // keeps “momentum” even if combo breaks a bit
-let energy = 0;          // 0..100, decays slowly, miss reduces but not to zero
+  /********************
+   * Helpers
+   ********************/
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const intro = document.getElementById("intro");
-const menu = document.getElementById("menu");
-const game = document.getElementById("game");
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
 
-const field = document.getElementById("field");
-const target = document.getElementById("target");
-const feedback = document.getElementById("feedback");
-const particles = document.getElementById("particles");
-const flash = document.getElementById("flash");
-const flybys = document.getElementById("flybys");
+  const nowMs = () => performance.now();
 
-const scoreEl = document.getElementById("score");
-const comboEl = document.getElementById("combo");
-const coinsEl = document.getElementById("coins");
-const bpmEl = document.getElementById("bpm");
-const lvlEl = document.getElementById("lvl");
-
-const livesEl = document.getElementById("lives");
-const energyFill = document.getElementById("energyFill");
-const energyPct = document.getElementById("energyPct");
-const vibeEl = document.getElementById("vibe");
-const streakEl = document.getElementById("streak");
-
-const settings = document.getElementById("settings");
-const gear = document.getElementById("gear");
-const closeSettings = document.getElementById("closeSettings");
-const vibrationToggle = document.getElementById("vibrationToggle");
-const musicToggle = document.getElementById("musicToggle");
-const volumeSlider = document.getElementById("volume");
-const skinsWrap = document.getElementById("skins");
-
-const playBtn = document.getElementById("playBtn");
-const openSettingsFromMenu = document.getElementById("openSettingsFromMenu");
-
-// ===== INTRO FLOW =====
-setTimeout(() => {
-  intro.classList.remove("active");
-  menu.classList.add("active");
-}, 2600);
-
-// ===== SETTINGS =====
-gear.addEventListener("click", (e) => { e.stopPropagation(); openSettings(); });
-closeSettings.addEventListener("click", (e) => { e.stopPropagation(); closeSettingsModal(); });
-openSettingsFromMenu.addEventListener("click", () => openSettings());
-settings.addEventListener("click", (e) => { if (e.target === settings) closeSettingsModal(); });
-
-vibrationToggle.addEventListener("change", (e) => { vibrationOn = e.target.checked; });
-
-musicToggle.addEventListener("change", async (e) => {
-  musicOn = e.target.checked;
-  if (musicOn) { await ensureAudio(); music.setMuted(false); }
-  else { if (music) music.setMuted(true); }
-});
-
-volumeSlider.addEventListener("input", () => {
-  if (music) music.setVolume(Number(volumeSlider.value) / 100);
-});
-
-function openSettings(){ settings.classList.add("active"); }
-function closeSettingsModal(){ settings.classList.remove("active"); }
-
-// ===== PLAY BUTTON =====
-playBtn.addEventListener("click", async () => {
-  menu.classList.remove("active");
-  game.classList.add("active");
-  await startGame();
-});
-
-// ===== SKINS =====
-const SKINS = [
-  { id:"neonMint", name:"Neon Mint", border:"#2de2e6", glow:"rgba(45,226,230,0.95)", core:"#ff2d86", bg:["#2de2e6","#1b1b3a","#09091a"] },
-  { id:"softCandy", name:"Soft Candy", border:"#7cff6b", glow:"rgba(124,255,107,0.85)", core:"#ff7aa2", bg:["#7cff6b","#2de2e6","#1b1b3a"] },
-  { id:"sunsetPop", name:"Sunset Pop", border:"#ff2d86", glow:"rgba(255,45,134,0.85)", core:"#ffd166", bg:["#ff2d86","#2de2e6","#09091a"] },
-  { id:"iceBlue", name:"Ice Blue", border:"#7aa7ff", glow:"rgba(122,167,255,0.85)", core:"#2de2e6", bg:["#7aa7ff","#1b1b3a","#09091a"] },
-  { id:"goldPunch", name:"Gold Punch", border:"#ffd166", glow:"rgba(255,209,102,0.85)", core:"#ff2d86", bg:["#ffd166","#ff2d86","#1b1b3a"] },
-  { id:"berryLime", name:"Berry Lime", border:"#b7ff3c", glow:"rgba(183,255,60,0.80)", core:"#8a2be2", bg:["#b7ff3c","#2de2e6","#1b1b3a"] }
-];
-
-let currentSkin = "neonMint";
-
-function renderSkins(){
-  skinsWrap.innerHTML = "";
-  SKINS.forEach(s => {
-    const el = document.createElement("div");
-    el.className = "skin" + (s.id === currentSkin ? " active" : "");
-    const sw = document.createElement("div");
-    sw.className = "sw";
-    sw.style.background = `linear-gradient(90deg, ${s.border}, ${s.core})`;
-    const nm = document.createElement("div");
-    nm.className = "nm";
-    nm.textContent = s.name;
-    el.appendChild(sw);
-    el.appendChild(nm);
-    el.addEventListener("click", () => { setSkin(s.id); renderSkins(); });
-    skinsWrap.appendChild(el);
-  });
-}
-
-function setSkin(id){
-  const s = SKINS.find(x => x.id === id);
-  if (!s) return;
-  currentSkin = id;
-  document.documentElement.style.setProperty("--skinBorder", s.border);
-  document.documentElement.style.setProperty("--skinGlow", s.glow);
-  document.documentElement.style.setProperty("--skinCore", s.core);
-  document.documentElement.style.setProperty("--bg1", s.bg[0]);
-  document.documentElement.style.setProperty("--bg2", s.bg[1]);
-  document.documentElement.style.setProperty("--bg3", s.bg[2]);
-}
-
-renderSkins();
-setSkin(currentSkin);
-
-// ===== LIVES UI =====
-function renderLives(){
-  livesEl.innerHTML = "";
-  for (let i=0; i<3; i++){
-    const img = document.createElement("img");
-    img.className = "heart" + (i < lives ? "" : " off");
-    img.alt = "heart";
-    img.src = "data:image/svg+xml;utf8," + encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-        <path d="M32 56s-18-10.6-26.3-22.7C-1.8 21.5 6.3 6 20.3 8.2c5 0.8 8.2 4.1 11.7 8 3.5-3.9 6.7-7.2 11.7-8C57.7 6 65.8 21.5 58.3 33.3 50 45.4 32 56 32 56z"
-              fill="#ff2d86" stroke="#050616" stroke-width="4" stroke-linejoin="round"/>
-        <path d="M20 18c4-6 10-6 12-2" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="4" stroke-linecap="round"/>
-      </svg>
-    `);
-    livesEl.appendChild(img);
+  function safeOn(el, ev, fn, opts) {
+    if (!el) return;
+    el.addEventListener(ev, fn, opts);
   }
-}
 
-// ===== MUSIC (WebAudio) =====
-let music = null;
+  /********************
+   * Detect layout (old vs new)
+   ********************/
+  const layoutOld = {
+    intro: $("#intro"),
+    menu: $("#menu"),
+    game: $("#game"),
+    target: $("#target"),
+    field: $("#field"),
+    feedback: $("#feedback"),
+    lives: $("#lives"),
+    settingsModal: $("#settings"),
+    closeSettings: $("#closeSettings"),
+    gear: $("#gear"),
+    playBtn: $("#playBtn"),
+    openSettingsFromMenu: $("#openSettingsFromMenu"),
+    vibe: $("#vibe"),
+    bpm: $("#bpm"),
+    lvl: $("#lvl"),
+    score: $("#score"),
+    combo: $("#combo"),
+    coins: $("#coins"),
+    energyFill: $("#energyFill"),
+    energyPct: $("#energyPct"),
+    streak: $("#streak"),
+    particles: $("#particles"),
+    flash: $("#flash"),
+    flybys: $("#flybys"),
+    skinsWrap: $("#skins"),
+    vibrationToggle: $("#vibrationToggle"),
+    musicToggle: $("#musicToggle"),
+    volume: $("#volume"),
+  };
 
-async function ensureAudio(){
-  if (music) return;
-  music = createMusicEngine();
-  music.setVolume(Number(volumeSlider.value) / 100);
-  if (!musicOn) music.setMuted(true);
-  await music.resume();
-}
+  const layoutNew = {
+    splash: $("#splash"),
+    mainMenu: $("#mainMenu"),
+    gameUI: $("#gameUI"),
+    canvas: $("#gameCanvas"),
+    feedback: $("#feedback"),
+    overlayDim: $("#overlayDim"),
+    settingsPanel: $("#settingsPanel"),
+    tutorialPanel: $("#tutorialPanel"),
+    achPanel: $("#achPanel"),
+    shopPanel: $("#shopPanel"),
+    btnPlay: $("#btnPlay"),
+    btnTutorial: $("#btnTutorial"),
+    btnAchievements: $("#btnAchievements"),
+    btnShop: $("#btnShop"),
+    btnGear: $("#btnGear"),
+    btnCloseSettings: $("#btnCloseSettings"),
+    btnResume: $("#btnResume"),
+    btnBackToMenu: $("#btnBackToMenu"),
+    toggleHaptics: $("#toggleHaptics"),
+    toggleSound: $("#toggleSound"),
+    coinsHome: $("#coinsHome"),
+    bestComboHome: $("#bestComboHome"),
+    hudScore: $("#hudScore"),
+    hudCombo: $("#hudCombo"),
+    hudCoins: $("#hudCoins"),
+    hudBpm: $("#hudBpm"),
+    hudLv: $("#hudLv"),
+    hudVibe: $("#hudVibe"),
+    hudEnergy: $("#hudEnergy"),
+    btnCloseTutorial: $("#btnCloseTutorial"),
+    btnStartFromTutorial: $("#btnStartFromTutorial"),
+    btnCloseAch: $("#btnCloseAch"),
+    btnAchOk: $("#btnAchOk"),
+    achList: $("#achList"),
+    btnCloseShop: $("#btnCloseShop"),
+    btnShopOk: $("#btnShopOk"),
+  };
 
-function createMusicEngine(){
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new AudioCtx();
+  const isNew = !!layoutNew.splash || !!layoutNew.mainMenu || !!layoutNew.gameUI;
+  const isOld = !!layoutOld.menu || !!layoutOld.game || !!layoutOld.target;
 
-  const master = ctx.createGain();
-  master.gain.value = 0.7;
-  master.connect(ctx.destination);
+  // If both exist somehow, prefer old (since your CSS currently targets #target etc).
+  const mode = isOld ? "old" : "new";
 
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -20;
-  comp.knee.value = 18;
-  comp.ratio.value = 6;
-  comp.attack.value = 0.005;
-  comp.release.value = 0.14;
-  comp.connect(master);
+  /********************
+   * Screen / panel control
+   ********************/
+  function showOldScreen(name) {
+    const screens = [layoutOld.intro, layoutOld.menu, layoutOld.game].filter(Boolean);
+    screens.forEach((s) => s.classList.remove("active"));
+    if (name === "intro" && layoutOld.intro) layoutOld.intro.classList.add("active");
+    if (name === "menu" && layoutOld.menu) layoutOld.menu.classList.add("active");
+    if (name === "game" && layoutOld.game) layoutOld.game.classList.add("active");
+  }
 
-  let muted = false;
-  let volume = 0.7;
+  function showNewScreen(name) {
+    // new uses "hidden" class
+    const { splash, mainMenu, gameUI } = layoutNew;
+    if (splash) splash.classList.toggle("hidden", name !== "splash");
+    if (mainMenu) mainMenu.classList.toggle("hidden", name !== "menu");
+    if (gameUI) gameUI.classList.toggle("hidden", name !== "game");
 
-  const tick = (t, freq, dur, type, gainVal, detune=0) => {
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
+    if (splash) splash.setAttribute("aria-hidden", name !== "splash" ? "true" : "false");
+    if (mainMenu) mainMenu.setAttribute("aria-hidden", name !== "menu" ? "true" : "false");
+    if (gameUI) gameUI.setAttribute("aria-hidden", name !== "game" ? "true" : "false");
+  }
+
+  function openOldSettings(open) {
+    if (!layoutOld.settingsModal) return;
+    layoutOld.settingsModal.classList.toggle("active", !!open);
+  }
+
+  function openNewPanel(panelEl, open) {
+    if (!panelEl) return;
+    const dim = layoutNew.overlayDim;
+    panelEl.classList.toggle("hidden", !open);
+    panelEl.setAttribute("aria-hidden", open ? "false" : "true");
+    if (dim) {
+      dim.classList.toggle("hidden", !open);
+      dim.setAttribute("aria-hidden", open ? "false" : "true");
+    }
+  }
+
+  /********************
+   * Persistent state
+   ********************/
+  const STORE_KEY = "tapbeat_save_v1";
+  const ACH_KEY = "tapbeat_ach_v1";
+
+  function loadSave() {
+    try {
+      return JSON.parse(localStorage.getItem(STORE_KEY)) || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveSave(obj) {
+    localStorage.setItem(STORE_KEY, JSON.stringify(obj));
+  }
+
+  function loadAch() {
+    try {
+      return JSON.parse(localStorage.getItem(ACH_KEY)) || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveAch(obj) {
+    localStorage.setItem(ACH_KEY, JSON.stringify(obj));
+  }
+
+  const save = loadSave();
+  const achUnlocked = loadAch();
+
+  /********************
+   * Settings
+   ********************/
+  let settings = {
+    haptics: save.haptics ?? true,
+    sound: save.sound ?? true,
+    volume: clamp(save.volume ?? 0.7, 0, 1),
+    skin: save.skin ?? "neo",
+  };
+
+  function persistSettings() {
+    save.haptics = settings.haptics;
+    save.sound = settings.sound;
+    save.volume = settings.volume;
+    save.skin = settings.skin;
+    saveSave(save);
+  }
+
+  function doHaptic(ms = 20) {
+    if (!settings.haptics) return;
+    // iOS Safari: navigator.vibrate often unsupported; but harmless to call.
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  /********************
+   * Skins (CSS variables)
+   ********************/
+  const SKINS = [
+    { id: "neo", name: "Neo Cyan", border: "#2de2e6", glow: "rgba(45,226,230,0.9)", core: "#f72585" },
+    { id: "mint", name: "Mint Pop", border: "#7cff6b", glow: "rgba(124,255,107,0.9)", core: "#2de2e6" },
+    { id: "pink", name: "Candy Pink", border: "#ff2d86", glow: "rgba(255,45,134,0.9)", core: "#ffd166" },
+    { id: "sky", name: "Sky Blue", border: "#4cc9f0", glow: "rgba(76,201,240,0.9)", core: "#ff2d86" },
+    { id: "sun", name: "Sun Gold", border: "#ffd166", glow: "rgba(255,209,102,0.9)", core: "#7cff6b" },
+  ];
+
+  function applySkin(id) {
+    const s = SKINS.find(x => x.id === id) || SKINS[0];
+    document.documentElement.style.setProperty("--skinBorder", s.border);
+    document.documentElement.style.setProperty("--skinGlow", s.glow);
+    document.documentElement.style.setProperty("--skinCore", s.core);
+    settings.skin = s.id;
+    persistSettings();
+  }
+  applySkin(settings.skin);
+
+  /********************
+   * Achievements
+   ********************/
+  const ACH = [
+    { id: "first_hit", title: "First Hit!", desc: "Land your first GREAT or PERFECT." },
+    { id: "first_perfect", title: "Perfect!", desc: "Get a PERFECT once." },
+    { id: "combo_10", title: "Combo x10", desc: "Reach combo 10." },
+    { id: "combo_25", title: "Combo x25", desc: "Reach combo 25." },
+    { id: "survive_60", title: "Stayin’ Alive", desc: "Play for 60 seconds." },
+    { id: "rich_vibe", title: "Into the Drop", desc: "Fill energy to 100% once." },
+  ];
+
+  function unlockAch(id) {
+    if (achUnlocked[id]) return;
+    achUnlocked[id] = { t: Date.now() };
+    saveAch(achUnlocked);
+    // show tiny toast using feedback
+    showFeedback("ACHIEVEMENT!", "WOW", 1400);
+    // If new layout, also refresh list if open
+    renderAchList();
+  }
+
+  function renderAchList() {
+    // old layout doesn't have a panel list; new layout has #achList
+    if (!layoutNew.achList) return;
+    const wrap = layoutNew.achList;
+    wrap.innerHTML = "";
+    ACH.forEach(a => {
+      const isOn = !!achUnlocked[a.id];
+      const row = document.createElement("div");
+      row.className = "achRow";
+      row.innerHTML = `
+        <div class="achLeft">
+          <div class="achTitle">${isOn ? "✅" : "⬜️"} ${a.title}</div>
+          <div class="achDesc">${a.desc}</div>
+        </div>
+        <div class="achRight">${isOn ? "Unlocked" : "Locked"}</div>
+      `;
+      wrap.appendChild(row);
+    });
+  }
+
+  /********************
+   * UI pointers (old + new)
+   ********************/
+  // Common score state
+  let coins = save.coins ?? 0;
+  let bestCombo = save.bestCombo ?? 0;
+
+  function persistStats() {
+    save.coins = coins;
+    save.bestCombo = bestCombo;
+    saveSave(save);
+  }
+
+  function setHomeStats() {
+    if (layoutNew.coinsHome) layoutNew.coinsHome.textContent = String(coins);
+    if (layoutNew.bestComboHome) layoutNew.bestComboHome.textContent = String(bestCombo);
+  }
+
+  setHomeStats();
+
+  /********************
+   * Audio (simple synth)
+   ********************/
+  let audioCtx = null;
+  let masterGain = null;
+
+  function ensureAudio() {
+    if (!settings.sound) return;
+    if (audioCtx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    audioCtx = new Ctx();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = settings.volume;
+    masterGain.connect(audioCtx.destination);
+  }
+
+  function setVolume(v01) {
+    settings.volume = clamp(v01, 0, 1);
+    persistSettings();
+    if (masterGain) masterGain.gain.value = settings.volume;
+  }
+
+  function ping(freq, dur = 0.06, type = "sine", gain = 0.25) {
+    if (!settings.sound) return;
+    ensureAudio();
+    if (!audioCtx || !masterGain) return;
+
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
     o.type = type;
     o.frequency.value = freq;
-    o.detune.value = detune;
-
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gainVal, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-
     o.connect(g);
-    g.connect(comp);
-
+    g.connect(masterGain);
     o.start(t);
     o.stop(t + dur + 0.02);
-  };
-
-  const noise = (t, dur, gainVal) => {
-    const bufferSize = Math.floor(ctx.sampleRate * dur);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random()*2-1);
-
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-
-    const bp = ctx.createBiquadFilter();
-    bp.type = "highpass";
-    bp.frequency.value = 2500;
-
-    const g = ctx.createGain();
-    g.gain.value = gainVal;
-
-    src.connect(bp);
-    bp.connect(g);
-    g.connect(comp);
-
-    src.start(t);
-    src.stop(t + dur);
-  };
-
-  function setVolume(v){
-    volume = Math.max(0, Math.min(1, v));
-    master.gain.value = muted ? 0 : volume;
-  }
-  function setMuted(m){
-    muted = !!m;
-    master.gain.value = muted ? 0 : volume;
-  }
-  async function resume(){
-    if (ctx.state !== "running") await ctx.resume();
   }
 
-  // harmonic palette
-  const base = 220;
-  const scale = [0, 3, 5, 7, 10]; // minor-ish
-  let step = 0;
+  function thump(dur = 0.08, gain = 0.35) {
+    if (!settings.sound) return;
+    ensureAudio();
+    if (!audioCtx || !masterGain) return;
 
-  function scheduleBeat(t, intensity){
-    if (muted) return;
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(70, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    g.connect(masterGain);
+    o.start(t);
+    o.stop(t + dur + 0.03);
+  }
 
-    // kick + hat
-    tick(t, 60, 0.08, "sine", 0.42);
-    tick(t, 48, 0.10, "sine", 0.18);
-    if (step % 2 === 1) noise(t, 0.04, 0.09);
+  /********************
+   * Game state
+   ********************/
+  let running = false;
 
-    // bass (energy unlock)
-    if (intensity >= 2){
-      const n = [0,0,3,0,5,0,3,0][step % 8];
-      tick(t, base * Math.pow(2, n/12), 0.16, "triangle", 0.20, -6);
+  // Timing windows (THIS is what you wanted to tweak)
+  // Сделал больше, чтобы "иногда мисс" ушло:
+  const PERFECT_WINDOW_MS = 95;   // было уже (обычно 60-80) — расширили
+  const GREAT_WINDOW_MS   = 175;  // расширили
+  const HIT_WINDOW_MS     = GREAT_WINDOW_MS; // всё что <= GREAT считается попаданием
+
+  // Beat / difficulty
+  let bpm = 88;          // старт медленнее
+  let level = 1;
+  let vibe = "Verse";
+  let energy = 0;        // 0..100
+  let score = 0;
+  let combo = 0;
+  let streak = 0;
+
+  // lives
+  const MAX_LIVES = 3;
+  let lives = MAX_LIVES;
+
+  // Beat scheduling
+  let beatIndex = 0;
+  let nextBeatTimeMs = 0;     // in performance.now() ms
+  let beatIntervalMs = 0;
+
+  // Target motion
+  let targetX = 0;
+  let targetY = 0;
+  let targetTX = 0;
+  let targetTY = 0;
+  let targetR = 75;
+
+  // RAF loop
+  let rafId = 0;
+
+  /********************
+   * Old layout particle helpers (uses #particles/#flash/#flybys)
+   ********************/
+  function spawnParticles(x, y, kind = "good") {
+    if (!layoutOld.particles) return;
+    const n = kind === "perfect" ? 22 : kind === "good" ? 14 : 10;
+    for (let i = 0; i < n; i++) {
+      const p = document.createElement("div");
+      p.className = "p";
+      const ang = Math.random() * Math.PI * 2;
+      const dist = (kind === "perfect" ? 90 : 60) * (0.4 + Math.random() * 0.8);
+      const dx = Math.cos(ang) * dist;
+      const dy = Math.sin(ang) * dist;
+      p.style.left = `${x}px`;
+      p.style.top = `${y}px`;
+      p.style.setProperty("--dx", `${dx}px`);
+      p.style.setProperty("--dy", `${dy}px`);
+      // color via inline
+      const c = kind === "perfect" ? "rgba(124,255,107,0.95)" : kind === "good" ? "rgba(45,226,230,0.95)" : "rgba(255,45,134,0.95)";
+      p.style.background = c;
+      layoutOld.particles.appendChild(p);
+      setTimeout(() => p.remove(), 700);
+    }
+  }
+
+  function flashOn() {
+    if (!layoutOld.flash) return;
+    layoutOld.flash.classList.remove("on");
+    // force reflow
+    void layoutOld.flash.offsetWidth;
+    layoutOld.flash.classList.add("on");
+  }
+
+  function spawnFlyby() {
+    if (!layoutOld.flybys) return;
+    const f = document.createElement("div");
+    f.className = "fly";
+    f.style.top = `${10 + Math.random() * 40}vh`;
+    layoutOld.flybys.appendChild(f);
+    setTimeout(() => f.remove(), 1400);
+  }
+
+  /********************
+   * Feedback text (anime-ish)
+   ********************/
+  let feedbackTimer = 0;
+  function showFeedback(text, style = "GREAT", ms = 520) {
+    const el = (mode === "old") ? layoutOld.feedback : layoutNew.feedback;
+    if (!el) return;
+
+    el.textContent = `${text}`;
+    el.classList.remove("f-miss", "f-good", "f-perfect", "f-wow");
+    if (style === "MISS") el.classList.add("f-miss");
+    if (style === "GREAT") el.classList.add("f-good");
+    if (style === "PERFECT") el.classList.add("f-perfect");
+    if (style === "WOW") el.classList.add("f-wow");
+
+    el.classList.remove("pop");
+    void el.offsetWidth;
+    el.classList.add("pop");
+
+    clearTimeout(feedbackTimer);
+    feedbackTimer = setTimeout(() => {
+      el.classList.remove("pop");
+      el.textContent = "";
+    }, ms);
+  }
+
+  /********************
+   * UI updates
+   ********************/
+  function renderLives() {
+    if (!layoutOld.lives) return;
+    layoutOld.lives.innerHTML = "";
+    for (let i = 0; i < MAX_LIVES; i++) {
+      const img = document.createElement("div");
+      img.className = "heart" + (i < lives ? "" : " off");
+      // Pure CSS heart via background (no files)
+      img.style.background =
+        "radial-gradient(circle at 30% 35%, #fff 0 20%, transparent 21%)," +
+        "radial-gradient(circle at 70% 35%, #fff 0 20%, transparent 21%)," +
+        "conic-gradient(from 220deg, transparent 0 40deg, #ff2d86 40deg 320deg, transparent 320deg 360deg)";
+      img.style.borderRadius = "8px";
+      img.style.boxShadow = "0 10px 18px rgba(0,0,0,0.25)";
+      layoutOld.lives.appendChild(img);
+    }
+  }
+
+  function updateHUD() {
+    if (mode === "old") {
+      if (layoutOld.score) layoutOld.score.textContent = String(score);
+      if (layoutOld.combo) layoutOld.combo.textContent = String(combo);
+      if (layoutOld.coins) layoutOld.coins.textContent = String(coins);
+      if (layoutOld.bpm) layoutOld.bpm.textContent = String(Math.round(bpm));
+      if (layoutOld.lvl) layoutOld.lvl.textContent = String(level);
+      if (layoutOld.vibe) layoutOld.vibe.textContent = vibe;
+      if (layoutOld.energyFill) layoutOld.energyFill.style.width = `${energy}%`;
+      if (layoutOld.energyPct) layoutOld.energyPct.textContent = String(Math.round(energy));
+      if (layoutOld.streak) layoutOld.streak.textContent = String(streak);
+      renderLives();
+    } else {
+      if (layoutNew.hudScore) layoutNew.hudScore.textContent = String(score);
+      if (layoutNew.hudCombo) layoutNew.hudCombo.textContent = String(combo);
+      if (layoutNew.hudCoins) layoutNew.hudCoins.textContent = String(coins);
+      if (layoutNew.hudBpm) layoutNew.hudBpm.textContent = String(Math.round(bpm));
+      if (layoutNew.hudLv) layoutNew.hudLv.textContent = String(level);
+      if (layoutNew.hudVibe) layoutNew.hudVibe.textContent = vibe;
+      if (layoutNew.hudEnergy) layoutNew.hudEnergy.textContent = `${Math.round(energy)}%`;
+    }
+  }
+
+  /********************
+   * Target positioning (OLD layout)
+   ********************/
+  function resizeTargetRadius() {
+    if (!layoutOld.target) return;
+    const rect = layoutOld.target.getBoundingClientRect();
+    targetR = Math.min(rect.width, rect.height) / 2;
+  }
+
+  function setTargetPos(x, y) {
+    if (!layoutOld.target) return;
+    layoutOld.target.style.transform = `translate(${x - targetR}px, ${y - targetR}px)`;
+  }
+
+  function pickNewTarget() {
+    if (!layoutOld.field) return;
+
+    const fr = layoutOld.field.getBoundingClientRect();
+    const pad = 90;
+    targetTX = fr.left + pad + Math.random() * (fr.width - pad * 2);
+    targetTY = fr.top + pad + Math.random() * (fr.height - pad * 2);
+  }
+
+  /********************
+   * Hit detection (full area of circle)
+   ********************/
+  function isPointInTarget(clientX, clientY) {
+    if (!layoutOld.target) return false;
+    const r = layoutOld.target.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    return (dx * dx + dy * dy) <= (targetR * targetR);
+  }
+
+  /********************
+   * Beat / scoring
+   ********************/
+  function resetRun() {
+    running = false;
+
+    bpm = 88;
+    level = 1;
+    vibe = "Verse";
+    energy = 0;
+    score = 0;
+    combo = 0;
+    streak = 0;
+    lives = MAX_LIVES;
+
+    beatIndex = 0;
+    beatIntervalMs = (60_000 / bpm);
+    nextBeatTimeMs = nowMs() + 900; // старт чуть медленнее, чтобы не "сразу"
+    pickNewTarget();
+
+    updateHUD();
+  }
+
+  function calcDifficulty() {
+    // BPM grows with combo, but not crazy
+    const base = 88;
+    const add = Math.min(52, combo * 1.1);
+    bpm = base + add;
+
+    // level rises every ~12 combo
+    level = 1 + Math.floor(combo / 12);
+
+    // vibe progression using energy
+    if (energy < 35) vibe = "Verse";
+    else if (energy < 70) vibe = "Build";
+    else if (energy < 100) vibe = "Chorus";
+    else vibe = "DROP";
+  }
+
+  function awardCoins(amount) {
+    coins += amount;
+    persistStats();
+    setHomeStats();
+  }
+
+  function onHit(kind) {
+    // kind: "perfect" | "good"
+    if (kind === "perfect") {
+      score += 180 + combo * 2;
+      combo += 1;
+      streak += 1;
+      energy = clamp(energy + 6, 0, 100);
+      awardCoins(2);
+      doHaptic(18);
+      ping(880, 0.05, "triangle", 0.22);
+      ping(1320, 0.05, "sine", 0.12);
+      showFeedback("PERFECT!", "PERFECT", 520);
+      unlockAch("first_perfect");
+    } else {
+      score += 110 + combo;
+      combo += 1;
+      streak += 1;
+      energy = clamp(energy + 3.5, 0, 100);
+      awardCoins(1);
+      doHaptic(12);
+      ping(660, 0.05, "triangle", 0.18);
+      showFeedback("GREAT!", "GREAT", 480);
     }
 
-    // chords-ish pulse (mid energy)
-    if (intensity >= 4 && step % 2 === 0){
-      const chord = [0, 7, 10];
-      chord.forEach((c, i) => tick(t, base * Math.pow(2, (12 + c)/12), 0.12, "sine", 0.06, i*4));
+    if (combo === 1) unlockAch("first_hit");
+    if (combo === 10) unlockAch("combo_10");
+    if (combo === 25) unlockAch("combo_25");
+    if (energy >= 100) unlockAch("rich_vibe");
+
+    bestCombo = Math.max(bestCombo, combo);
+    persistStats();
+    setHomeStats();
+
+    // Old layout FX
+    if (mode === "old") {
+      const tr = layoutOld.target.getBoundingClientRect();
+      const cx = tr.left + tr.width / 2;
+      const cy = tr.top + tr.height / 2;
+      spawnParticles(cx, cy, kind === "perfect" ? "perfect" : "good");
+      flashOn();
+      if (Math.random() < 0.28) spawnFlyby();
+      layoutOld.target.classList.remove("pulse");
+      void layoutOld.target.offsetWidth;
+      layoutOld.target.classList.add("pulse");
     }
 
-    // lead (high energy)
-    if (intensity >= 6){
-      const n = 12 + scale[(step + intensity) % scale.length];
-      tick(t, base * Math.pow(2, n/12), 0.11, "square", 0.08);
+    // After some hits, gently speed up scheduler
+    calcDifficulty();
+    beatIntervalMs = (60_000 / bpm);
+
+    updateHUD();
+    pickNewTarget();
+  }
+
+  function onMiss() {
+    // Important: do NOT restart whole music/progress — just penalty
+    lives = Math.max(0, lives - 1);
+    combo = 0;
+    streak = 0;
+    energy = clamp(energy - 10, 0, 100);
+
+    doHaptic(35);
+    thump(0.08, 0.38);
+    showFeedback("MISS!", "MISS", 560);
+
+    updateHUD();
+
+    if (lives <= 0) {
+      // Game over → back to menu
+      running = false;
+      cancelAnimationFrame(rafId);
+
+      // small delay so player sees miss/game over feel
+      setTimeout(() => {
+        if (mode === "old") showOldScreen("menu");
+        else showNewScreen("menu");
+      }, 450);
+    }
+  }
+
+  function judgeTap(tapMs) {
+    // Find nearest beat time.
+    // We'll judge against nextBeatTimeMs and previous beat too, so taps slightly early/late are OK.
+    const prev = nextBeatTimeMs - beatIntervalMs;
+    const d1 = Math.abs(tapMs - prev);
+    const d2 = Math.abs(tapMs - nextBeatTimeMs);
+    const d = Math.min(d1, d2);
+
+    if (d <= PERFECT_WINDOW_MS) return "perfect";
+    if (d <= GREAT_WINDOW_MS) return "good";
+    return "miss";
+  }
+
+  /********************
+   * Game loop (OLD layout)
+   ********************/
+  function step() {
+    if (!running) return;
+
+    const t = nowMs();
+
+    // Advance beat schedule
+    while (t >= nextBeatTimeMs) {
+      // beat tick sound varies by vibe (richer later)
+      if (settings.sound) {
+        if (vibe === "Verse") ping(220, 0.04, "sine", 0.10);
+        else if (vibe === "Build") { ping(220, 0.04, "sine", 0.11); ping(440, 0.04, "triangle", 0.08); }
+        else if (vibe === "Chorus") { ping(330, 0.04, "triangle", 0.12); ping(660, 0.04, "sine", 0.10); }
+        else { ping(440, 0.04, "sawtooth", 0.12); ping(880, 0.04, "triangle", 0.10); ping(1320, 0.03, "sine", 0.07); }
+      }
+
+      beatIndex++;
+      nextBeatTimeMs += beatIntervalMs;
+
+      // passive energy decay
+      energy = clamp(energy - 0.25, 0, 100);
+      updateHUD();
     }
 
-    // sparkle (drop)
-    if (intensity >= 8 && step % 4 === 0){
-      const n = 24 + scale[(step/2) % scale.length];
-      tick(t, base * Math.pow(2, n/12), 0.08, "sine", 0.08);
+    // Smooth glide target toward targetTX/TY
+    if (mode === "old") {
+      if (!layoutOld.field || !layoutOld.target) {
+        // if markup changed mid-flight
+        running = false;
+        return;
+      }
+
+      // on first frame ensure sizes
+      resizeTargetRadius();
+
+      // current position in screen coords
+      if (targetX === 0 && targetY === 0) {
+        const fr = layoutOld.field.getBoundingClientRect();
+        targetX = fr.left + fr.width * 0.5;
+        targetY = fr.top + fr.height * 0.5;
+        targetTX = targetX;
+        targetTY = targetY;
+      }
+
+      // glide
+      const glide = 0.08; // smooth, not jerky
+      targetX = lerp(targetX, targetTX, glide);
+      targetY = lerp(targetY, targetTY, glide);
+
+      setTargetPos(targetX, targetY);
     }
 
-    step++;
+    rafId = requestAnimationFrame(step);
   }
 
-  return { ctx, resume, scheduleBeat, setVolume, setMuted };
-}
+  /********************
+   * Input (OLD layout: tap must be inside target)
+   ********************/
+  function onPointerDown(e) {
+    if (!running) return;
+    // If settings open — ignore
+    if (mode === "old" && layoutOld.settingsModal?.classList.contains("active")) return;
 
-// ===== GAME LOOP =====
-let pos = { x: 80, y: 260 };
-let goal = { x: 80, y: 260 };
-let rafId = null;
+    const pt = (e.touches && e.touches[0]) ? e.touches[0] : e;
+    const inside = isPointInTarget(pt.clientX, pt.clientY);
 
-function lerp(a,b,t){ return a + (b-a)*t; }
+    if (!inside) {
+      onMiss();
+      return;
+    }
 
-function animate(){
-  pos.x = lerp(pos.x, goal.x, 0.10);
-  pos.y = lerp(pos.y, goal.y, 0.10);
-  target.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-  rafId = requestAnimationFrame(animate);
-}
-
-function randomGoal(){
-  const safeTop = 110;
-  const safeBottom = 80;
-  const safeSides = 16;
-
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-
-  const x = Math.random() * (w - 150 - safeSides*2) + safeSides;
-  const y = Math.random() * (h - 150 - safeTop - safeBottom) + safeTop;
-
-  goal.x = x;
-  goal.y = y;
-}
-
-// ===== TIMING: nearest beat =====
-let beatTimer = null;
-let gameStartPerf = 0;     // performance.now() at game start
-let beatIndex = 0;
-
-function getBeatInterval(){ return 60 / bpm; }
-
-function nearestBeatDeltaSec(nowSec){
-  // nowSec is relative to game start
-  const interval = getBeatInterval();
-  const nearest = Math.round(nowSec / interval) * interval;
-  return Math.abs(nowSec - nearest);
-}
-
-// ===== JUDGEMENT WINDOWS =====
-function judgeTap(nowSec){
-  // widen slightly so “in time” feels fair on mobile
-  const perfectWindow = Math.max(0.075, 0.15 - (bpm-72)*0.0009);
-  const greatWindow = perfectWindow + 0.09;
-
-  const d = nearestBeatDeltaSec(nowSec);
-  if (d <= perfectWindow) return "perfect";
-  if (d <= greatWindow) return "great";
-  return "miss";
-}
-
-// ===== INPUT (mobile reliable) =====
-// Use pointerdown for immediate response (no click delay)
-target.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (!playing) return;
-  const nowSec = (performance.now() - gameStartPerf) / 1000;
-  const res = judgeTap(nowSec);
-  if (res === "perfect") onHitPerfect();
-  else if (res === "great") onHitGreat();
-  else onMiss();
-}, { passive:false });
-
-field.addEventListener("pointerdown", (e) => {
-  // if tap anywhere else -> miss
-  if (!playing) return;
-  // avoid counting if user actually tapped target but propagation bug
-  if (e.target && (e.target.id === "target")) return;
-  onMiss();
-}, { passive:true });
-
-// ===== EFFECTS =====
-function popText(text, color, withFx=true){
-  feedback.textContent = text;
-  feedback.style.color = color;
-
-  feedback.classList.remove("pop");
-  feedback.classList.add("anime");
-  feedback.classList.toggle("fx", !!withFx);
-
-  void feedback.offsetWidth;
-  feedback.classList.add("pop");
-  setTimeout(() => feedback.classList.remove("pop"), 420);
-}
-
-function burst(x, y, palette){
-  const count = 22;
-  for (let i=0; i<count; i++){
-    const p = document.createElement("div");
-    p.className = "p";
-    p.style.background = palette[i % palette.length];
-    p.style.left = (x + 75) + "px";
-    p.style.top = (y + 75) + "px";
-    const dx = (Math.random()*2-1) * (110 + Math.random()*130);
-    const dy = (Math.random()*2-1) * (110 + Math.random()*130);
-    p.style.setProperty("--dx", dx + "px");
-    p.style.setProperty("--dy", dy + "px");
-    particles.appendChild(p);
-    setTimeout(() => p.remove(), 560);
-  }
-}
-
-function screenFlash(){
-  flash.classList.remove("on");
-  void flash.offsetWidth;
-  flash.classList.add("on");
-}
-
-function vibe(ms){
-  if (!vibrationOn) return;
-  if (navigator.vibrate) navigator.vibrate(ms);
-}
-
-// ===== PROGRESSION =====
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-
-function energyToIntensity(){
-  // 1..8
-  if (energy >= 85) return 8;
-  if (energy >= 70) return 7;
-  if (energy >= 55) return 6;
-  if (energy >= 40) return 5;
-  if (energy >= 28) return 4;
-  if (energy >= 18) return 3;
-  if (energy >= 10) return 2;
-  return 1;
-}
-
-function updateVibe(){
-  if (energy >= 85) vibeEl.textContent = "DROP";
-  else if (energy >= 55) vibeEl.textContent = "Chorus";
-  else vibeEl.textContent = "Verse";
-}
-
-function recalcLevel(){
-  lvl = 1 + Math.floor(score / 2500);
-}
-
-function updateDifficulty(){
-  // BPM increases with energy + level, but starts slow
-  const base = 72;
-  const targetBpm = base + (energy * 0.55) + (lvl * 1.2);
-  bpm = lerp(bpm, clamp(targetBpm, 72, 160), 0.12);
-}
-
-function updateUI(){
-  scoreEl.textContent = score;
-  comboEl.textContent = combo;
-  coinsEl.textContent = coins;
-  bpmEl.textContent = Math.round(bpm);
-  lvlEl.textContent = lvl;
-
-  energyFill.style.width = `${Math.round(energy)}%`;
-  energyPct.textContent = Math.round(energy);
-  streakEl.textContent = streak;
-
-  updateVibe();
-  renderLives();
-}
-
-// ===== BEAT LOOP =====
-function beatTick(){
-  if (!playing) return;
-
-  beatIndex++;
-  target.classList.add("pulse");
-  setTimeout(() => target.classList.remove("pulse"), 180);
-
-  randomGoal();
-
-  // schedule audio slightly ahead
-  if (music && musicOn){
-    const t = music.ctx.currentTime + 0.02;
-    music.scheduleBeat(t, energyToIntensity());
+    const res = judgeTap(nowMs());
+    if (res === "perfect") onHit("perfect");
+    else if (res === "good") onHit("good");
+    else onMiss();
   }
 
-  // flyby distractions appear as you get stronger
-  maybeFlyby();
+  /********************
+   * Skins UI (OLD settings modal)
+   ********************/
+  function buildSkinsUI() {
+    if (!layoutOld.skinsWrap) return;
+    layoutOld.skinsWrap.innerHTML = "";
 
-  updateDifficulty();
-  updateUI();
-
-  clearTimeout(beatTimer);
-  beatTimer = setTimeout(beatTick, (60 / bpm) * 1000);
-}
-
-// ===== LIVES & MISS POLICY =====
-function loseLife(){
-  lives = Math.max(0, lives - 1);
-  if (lives <= 0){
-    endRun();
+    SKINS.forEach(s => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "skinBtn";
+      b.textContent = s.name;
+      b.style.border = `2px solid ${s.border}`;
+      b.style.background = "rgba(255,255,255,0.06)";
+      b.style.color = "#fff";
+      b.style.padding = "10px 12px";
+      b.style.borderRadius = "14px";
+      b.style.cursor = "pointer";
+      b.style.margin = "6px 8px 0 0";
+      b.onclick = () => applySkin(s.id);
+      layoutOld.skinsWrap.appendChild(b);
+    });
   }
-}
 
-function endRun(){
-  playing = false;
-  clearTimeout(beatTimer);
-  popText("GAME OVER", "#ffd166", false);
+  /********************
+   * Wiring: OLD layout
+   ********************/
+  function initOld() {
+    buildSkinsUI();
 
-  // back to menu after a moment
-  setTimeout(() => {
-    game.classList.remove("active");
-    menu.classList.add("active");
-  }, 1300);
-}
+    // Set toggles
+    if (layoutOld.vibrationToggle) layoutOld.vibrationToggle.checked = settings.haptics;
+    if (layoutOld.musicToggle) layoutOld.musicToggle.checked = settings.sound;
+    if (layoutOld.volume) layoutOld.volume.value = String(Math.round(settings.volume * 100));
 
-// ===== HIT HANDLERS =====
-function onHitPerfect(){
-  vibe(26);
+    safeOn(layoutOld.vibrationToggle, "change", (e) => {
+      settings.haptics = !!e.target.checked;
+      persistSettings();
+      doHaptic(20);
+    });
 
-  combo += 1;
-  streak += 1;
+    safeOn(layoutOld.musicToggle, "change", (e) => {
+      settings.sound = !!e.target.checked;
+      persistSettings();
+      if (settings.sound) ensureAudio();
+    });
 
-  // score + energy
-  score += 130 + Math.min(220, combo * 2.2);
-  energy = clamp(energy + 4.0, 0, 100);
+    safeOn(layoutOld.volume, "input", (e) => {
+      const v = Number(e.target.value) / 100;
+      setVolume(v);
+    });
 
-  // coins
-  if (streak % 6 === 0) coins += 1;
+    // intro -> menu
+    showOldScreen("intro");
+    setTimeout(() => showOldScreen("menu"), 1200);
 
-  recalcLevel();
-  updateDifficulty();
+    // play
+    safeOn(layoutOld.playBtn, "click", async () => {
+      ensureAudio();
+      // iOS needs user gesture to start audio context
+      if (audioCtx && audioCtx.state === "suspended") {
+        try { await audioCtx.resume(); } catch {}
+      }
 
-  popText("PERFECT!", "var(--perfect)", true);
-  burst(goal.x, goal.y, ["#7cff6b","#2de2e6","#ffd166","#ff2d86"]);
-  if (streak % 10 === 0) screenFlash();
+      resetRun();
+      showOldScreen("game");
+      running = true;
+      // schedule from "now"
+      nextBeatTimeMs = nowMs() + 900;
+      rafId = requestAnimationFrame(step);
+    });
 
-  updateUI();
-}
+    // settings
+    safeOn(layoutOld.openSettingsFromMenu, "click", () => openOldSettings(true));
+    safeOn(layoutOld.gear, "click", () => openOldSettings(true));
+    safeOn(layoutOld.closeSettings, "click", () => openOldSettings(false));
 
-function onHitGreat(){
-  vibe(16);
+    // tap handler on whole document for reliability, but we check circle area anyway
+    safeOn(document, "pointerdown", onPointerDown, { passive: true });
+    safeOn(document, "touchstart", onPointerDown, { passive: true });
 
-  combo += 1;
-  streak += 1;
+    updateHUD();
+    renderLives();
 
-  score += 80 + Math.min(140, combo * 1.6);
-  energy = clamp(energy + 2.5, 0, 100);
-
-  if (streak % 10 === 0) coins += 1;
-
-  recalcLevel();
-  updateDifficulty();
-
-  popText("GREAT!", "var(--good)", true);
-  burst(goal.x, goal.y, ["#2de2e6","#7aa7ff","#ffd166"]);
-
-  updateUI();
-}
-
-function onMiss(){
-  vibe(10);
-
-  // IMPORTANT: do NOT reset everything to zero.
-  // - combo breaks
-  // - energy drops but not to zero
-  combo = 0;
-  streak = Math.max(0, streak - 3);
-  energy = clamp(energy - 14, 0, 100);
-
-  popText("MISS!", "var(--miss)", true);
-  burst(goal.x, goal.y, ["#ff2d86","#ff2d86","#2de2e6"]);
-
-  loseLife();
-  updateDifficulty();
-  updateUI();
-}
-
-// ===== PASSIVE ENERGY DECAY (so music breathes) =====
-let decayTimer = null;
-function startDecay(){
-  clearInterval(decayTimer);
-  decayTimer = setInterval(() => {
-    if (!playing) return;
-    // gentle decay; less decay at high energy so it feels rewarding
-    const d = (energy >= 70) ? 0.20 : 0.35;
-    energy = clamp(energy - d, 0, 100);
-    updateDifficulty();
-    updateUI();
-  }, 250);
-}
-
-// ===== FLYBYS =====
-function maybeFlyby(){
-  // more flybys when energy/level grows
-  const chance = (energy / 100) * 0.35 + (lvl * 0.02); // 0..~
-  if (Math.random() < chance){
-    const el = document.createElement("div");
-    el.className = "fly";
-    el.style.top = `${Math.random()*60 + 10}vh`;
-    el.style.left = `-20vw`;
-    el.style.opacity = `${0.55 + Math.random()*0.35}`;
-    el.style.transform = `rotate(${(Math.random()*16-8)}deg)`;
-    flybys.appendChild(el);
-    setTimeout(() => el.remove(), 1300);
+    // survive achievement timer
+    let startMs = 0;
+    setInterval(() => {
+      if (!running) { startMs = 0; return; }
+      if (!startMs) startMs = nowMs();
+      if (nowMs() - startMs >= 60_000) unlockAch("survive_60");
+    }, 1000);
   }
-}
 
-// ===== START =====
-async function startGame(){
-  playing = true;
+  /********************
+   * Wiring: NEW layout (fallback)
+   * (If you later switch to canvas version again, you won't "hang")
+   ********************/
+  function initNew() {
+    // sync toggles
+    if (layoutNew.toggleHaptics) layoutNew.toggleHaptics.checked = settings.haptics;
+    if (layoutNew.toggleSound) layoutNew.toggleSound.checked = settings.sound;
 
-  await ensureAudio();
+    safeOn(layoutNew.toggleHaptics, "change", (e) => {
+      settings.haptics = !!e.target.checked;
+      persistSettings();
+      doHaptic(20);
+    });
 
-  // reset run
-  score = 0;
-  combo = 0;
-  coins = 0;
-  bpm = 72;
-  lvl = 1;
+    safeOn(layoutNew.toggleSound, "change", (e) => {
+      settings.sound = !!e.target.checked;
+      persistSettings();
+      if (settings.sound) ensureAudio();
+    });
 
-  lives = 3;
-  streak = 0;
-  energy = 6; // start with a tiny bit so music feels alive
+    function closeAllPanels() {
+      openNewPanel(layoutNew.settingsPanel, false);
+      openNewPanel(layoutNew.tutorialPanel, false);
+      openNewPanel(layoutNew.achPanel, false);
+      openNewPanel(layoutNew.shopPanel, false);
+    }
 
-  updateUI();
+    // splash -> menu
+    showNewScreen("splash");
+    setTimeout(() => showNewScreen("menu"), 1200);
 
-  // position
-  pos.x = 60;
-  pos.y = 260;
-  goal.x = 60;
-  goal.y = 260;
+    safeOn(layoutNew.btnPlay, "click", async () => {
+      ensureAudio();
+      if (audioCtx && audioCtx.state === "suspended") {
+        try { await audioCtx.resume(); } catch {}
+      }
+      resetRun();
+      showNewScreen("game");
+      running = true;
+      nextBeatTimeMs = nowMs() + 900;
+      rafId = requestAnimationFrame(step); // step only moves target if old; new just runs beats/HUD
+    });
 
-  if (!rafId) animate();
+    safeOn(layoutNew.btnGear, "click", () => openNewPanel(layoutNew.settingsPanel, true));
+    safeOn(layoutNew.btnCloseSettings, "click", () => openNewPanel(layoutNew.settingsPanel, false));
+    safeOn(layoutNew.btnResume, "click", () => openNewPanel(layoutNew.settingsPanel, false));
+    safeOn(layoutNew.btnBackToMenu, "click", () => {
+      running = false;
+      cancelAnimationFrame(rafId);
+      closeAllPanels();
+      showNewScreen("menu");
+    });
 
-  // start timebase
-  gameStartPerf = performance.now();
-  beatIndex = 0;
+    safeOn(layoutNew.btnTutorial, "click", () => openNewPanel(layoutNew.tutorialPanel, true));
+    safeOn(layoutNew.btnCloseTutorial, "click", () => openNewPanel(layoutNew.tutorialPanel, false));
+    safeOn(layoutNew.btnStartFromTutorial, "click", async () => {
+      openNewPanel(layoutNew.tutorialPanel, false);
+      ensureAudio();
+      if (audioCtx && audioCtx.state === "suspended") {
+        try { await audioCtx.resume(); } catch {}
+      }
+      resetRun();
+      showNewScreen("game");
+      running = true;
+      nextBeatTimeMs = nowMs() + 900;
+      rafId = requestAnimationFrame(step);
+    });
 
-  // slower start: give player a tiny “ready” gap
-  popText("READY!", "#ffd166", false);
-  setTimeout(() => popText("GO!", "#7cff6b", false), 520);
+    safeOn(layoutNew.btnAchievements, "click", () => {
+      renderAchList();
+      openNewPanel(layoutNew.achPanel, true);
+    });
+    safeOn(layoutNew.btnCloseAch, "click", () => openNewPanel(layoutNew.achPanel, false));
+    safeOn(layoutNew.btnAchOk, "click", () => openNewPanel(layoutNew.achPanel, false));
 
-  clearTimeout(beatTimer);
-  setTimeout(() => {
-    beatTick();
-    startDecay();
-  }, 900);
-}
+    safeOn(layoutNew.btnShop, "click", () => openNewPanel(layoutNew.shopPanel, true));
+    safeOn(layoutNew.btnCloseShop, "click", () => openNewPanel(layoutNew.shopPanel, false));
+    safeOn(layoutNew.btnShopOk, "click", () => openNewPanel(layoutNew.shopPanel, false));
 
-// smooth on resize
-window.addEventListener("resize", () => {
-  randomGoal();
-});
+    // For new layout we don't know your canvas gameplay yet;
+    // but at least it won't hang and menus/settings will work.
+    updateHUD();
+    setHomeStats();
+  }
+
+  /********************
+   * Boot
+   ********************/
+  // If you accidentally have mismatched HTML/CSS, at least don't hard-crash:
+  try {
+    if (mode === "old") initOld();
+    else initNew();
+  } catch (e) {
+    console.error("TapBeat init error:", e);
+    // Fallback: show whichever menu exists
+    if (layoutOld.menu) showOldScreen("menu");
+    if (layoutNew.mainMenu) showNewScreen("menu");
+  }
+
+  /********************
+   * IMPORTANT: where to tweak leniency (what you asked)
+   ********************
+   * PERFECT_WINDOW_MS / GREAT_WINDOW_MS at top of game state.
+   * Increase GREAT_WINDOW_MS if you still see random MISS while on beat.
+   * Example: change GREAT_WINDOW_MS from 175 to 210.
+   */
+})();
