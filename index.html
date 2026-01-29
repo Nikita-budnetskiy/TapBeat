@@ -20,40 +20,72 @@
 <div id="menu" class="screen">
   <h1 class="logo">TapBeat</h1>
   <button id="playBtn" class="main-btn">PLAY</button>
-  <button id="settingsBtn" class="secondary-btn">SETTINGS</button>
+  <button id="openSettingsFromMenu" class="secondary-btn">SETTINGS</button>
 </div>
 
 <!-- GAME -->
 <div id="game" class="screen">
-
   <!-- HUD -->
   <div class="hud">
-    <div>SCORE <span id="score">0</span></div>
-    <div>COMBO <span id="combo">0</span></div>
-    <div>BPM <span id="bpm">90</span></div>
-    <button id="gear">⚙️</button>
+    <div class="hud-item">SCORE <span id="score">0</span></div>
+    <div class="hud-item">COMBO <span id="combo">0</span></div>
+    <div class="hud-item">COINS <span id="coins">0</span></div>
+    <div class="hud-item">BPM <span id="bpm">90</span></div>
+    <div class="hud-item">LV <span id="lvl">1</span></div>
+    <button id="gear" class="gear" aria-label="Settings">⚙️</button>
   </div>
 
-  <!-- PLAY FIELD -->
-  <div id="field">
-    <div id="target">
+  <!-- BIG FEEDBACK (anime style) -->
+  <div id="feedback" class="feedback"></div>
+
+  <!-- FIELD -->
+  <div id="field" aria-label="play field">
+    <div id="target" aria-label="tap target">
+      <div class="ring ring1"></div>
+      <div class="ring ring2"></div>
       <div class="core"></div>
     </div>
+    <div id="particles"></div>
+    <div id="flash"></div>
   </div>
-
-  <!-- FEEDBACK -->
-  <div id="feedback"></div>
-
 </div>
 
-<!-- SETTINGS -->
-<div id="settings" class="screen modal">
-  <h2>Settings</h2>
-  <label>
-    <input type="checkbox" id="vibrationToggle" checked />
-    Vibration
-  </label>
-  <button id="closeSettings">Close</button>
+<!-- SETTINGS MODAL -->
+<div id="settings" class="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>Settings</h2>
+      <button id="closeSettings" class="xbtn" aria-label="Close">✕</button>
+    </div>
+
+    <div class="row">
+      <label class="toggle">
+        <input type="checkbox" id="vibrationToggle" checked />
+        <span>Vibration</span>
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" id="musicToggle" checked />
+        <span>Music</span>
+      </label>
+    </div>
+
+    <div class="row">
+      <label class="slider">
+        <span>Volume</span>
+        <input type="range" id="volume" min="0" max="100" value="70" />
+      </label>
+    </div>
+
+    <div class="section">
+      <h3>Skins (try all)</h3>
+      <div id="skins" class="skins"></div>
+    </div>
+
+    <div class="section small">
+      <p><b>Tip:</b> Perfect hits build combo → music gets richer → BPM climbs.</p>
+    </div>
+  </div>
 </div>
 
 <script src="game.js"></script>
