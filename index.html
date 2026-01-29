@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b10" />
   <title>TAPBEAT</title>
-
   <link rel="stylesheet" href="style.css" />
 </head>
 
@@ -15,12 +14,26 @@
     <header class="topbar">
       <div class="brand">
         <span class="logo">TAPBEAT</span>
-        <span class="tag">one finger • pure timing</span>
+        <span class="tag">tap • move • unlock</span>
       </div>
 
-      <button class="icon-btn" id="btnPause" aria-label="Pause">
-        <span class="icon">Ⅱ</span>
-      </button>
+      <div class="top-actions">
+        <button class="pill-btn" id="btnShop" aria-label="Shop">
+          <span class="pill-ico">🛍</span><span>Shop</span>
+        </button>
+
+        <button class="pill-btn" id="btnAchievements" aria-label="Achievements">
+          <span class="pill-ico">🏆</span><span>Goals</span>
+        </button>
+
+        <button class="pill-btn" id="btnSettings" aria-label="Settings">
+          <span class="pill-ico">⚙️</span><span>Settings</span>
+        </button>
+
+        <button class="icon-btn" id="btnPause" aria-label="Pause">
+          <span class="icon">Ⅱ</span>
+        </button>
+      </div>
     </header>
 
     <main class="stage" id="stage" aria-label="Game stage">
@@ -33,6 +46,10 @@
           <div class="stat">
             <div class="label">COMBO</div>
             <div class="value" id="combo">0</div>
+          </div>
+          <div class="stat">
+            <div class="label">COINS</div>
+            <div class="value" id="coins">0</div>
           </div>
         </div>
 
@@ -48,8 +65,12 @@
         </div>
       </div>
 
-      <section class="target-wrap" aria-label="Tap target">
+      <section class="playfield" aria-label="Playfield">
+        <div class="trail" id="trail" aria-hidden="true"></div>
+
         <div class="target" id="target">
+          <div class="sweet" aria-hidden="true"></div>
+
           <div class="ring ring-outer" id="ringOuter"></div>
           <div class="ring ring-inner" id="ringInner"></div>
 
@@ -57,11 +78,11 @@
             <div class="core-dot"></div>
             <div class="core-text">
               <div class="hint" id="hint">TAP ON THE BEAT</div>
-              <div class="judgement" id="judge"> </div>
+              <div class="judgement" id="judge"></div>
             </div>
           </div>
 
-          <div class="sweet" aria-hidden="true"></div>
+          <div class="particles" id="particles" aria-hidden="true"></div>
         </div>
       </section>
 
@@ -70,19 +91,26 @@
           <div class="bar" id="bar"></div>
         </div>
         <div class="footer-row">
-          <div class="mini">Hit streak builds the track.</div>
           <div class="mini" id="trackState">Track: Kick</div>
+          <div class="mini" id="energy">Energy: 0%</div>
         </div>
       </footer>
     </main>
+    
+    <!-- SPLASH / INTRO -->
+<div class="overlay splash" id="splashOverlay" aria-hidden="true">
+  <div class="splash-inner">
+    <div class="splash-title">Nota Bene studio</div>
+    <div class="splash-sub" id="splashPresents">presents</div>
+  </div>
+</div>
 
     <!-- START SCREEN -->
     <div class="overlay" id="startOverlay" role="dialog" aria-modal="true">
       <div class="card">
         <h1>TAPBEAT</h1>
         <p class="lead">
-          One target. One finger. Tap when the ring hits the sweet spot.
-          Build combo to unlock more layers.
+          Tap when the ring hits the dashed sweet zone. Build combo to unlock layers, earn coins, and move faster.
         </p>
 
         <div class="row">
@@ -107,21 +135,37 @@
 
         <div class="row">
           <label class="toggle">
+            <input type="checkbox" id="sound" checked />
+            <span>Sound</span>
+          </label>
+
+          <label class="toggle">
             <input type="checkbox" id="haptics" checked />
             <span>Haptics</span>
           </label>
 
           <label class="toggle">
-            <input type="checkbox" id="sound" checked />
-            <span>Sound</span>
+            <input type="checkbox" id="tutorial" checked />
+            <span>Tutorial</span>
           </label>
         </div>
 
         <button class="primary" id="btnStart">Start</button>
+        <p class="fine">iPhone note: sound starts only after you press <b>Start</b>.</p>
+      </div>
+    </div>
 
-        <p class="fine">
-          Tip: On iPhone, sound starts after you press <b>Start</b> (browser rule).
-        </p>
+    <!-- TUTORIAL -->
+    <div class="overlay hidden" id="tutorialOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2 id="tTitle">Tutorial</h2>
+        <p class="lead" id="tText">Tap when the ring lands inside the dashed sweet zone.</p>
+        <div class="row">
+          <button class="secondary" id="btnTBack">Back</button>
+          <button class="secondary" id="btnTNext">Next</button>
+          <button class="primary" id="btnTSkip">Skip</button>
+        </div>
+        <p class="fine">Tip: don’t chase the ring — feel the pulse.</p>
       </div>
     </div>
 
@@ -133,11 +177,71 @@
           <button class="secondary" id="btnResume">Resume</button>
           <button class="ghost" id="btnRestart">Restart</button>
         </div>
+        <p class="fine">Combo unlocks more sound and better coin rewards.</p>
+      </div>
+    </div>
+
+    <!-- ACHIEVEMENTS -->
+    <div class="overlay hidden" id="achOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Goals</h2>
+        <div class="list" id="achList"></div>
+        <div class="row">
+          <button class="primary" id="btnAchClose">Close</button>
+        </div>
+        <p class="fine">Rewards are granted instantly when you hit a goal.</p>
+      </div>
+    </div>
+
+    <!-- SHOP (stub) -->
+    <div class="overlay hidden" id="shopOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Shop (beta)</h2>
+        <p class="lead">
+          Unlock beatpacks & skins with coins. Real payments later — for now this is progression-only.
+        </p>
+        <div class="shop-grid" id="shopGrid"></div>
+        <div class="row">
+          <button class="primary" id="btnShopClose">Close</button>
+        </div>
+        <p class="fine">Perfect taps earn more coins.</p>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true">
+      <div class="card">
+        <h2>Settings</h2>
+
+        <div class="row">
+          <label class="toggle">
+            <input type="checkbox" id="setSound" />
+            <span>Sound</span>
+          </label>
+
+          <label class="toggle">
+            <input type="checkbox" id="setHaptics" />
+            <span>Haptics</span>
+          </label>
+
+          <label class="toggle">
+            <input type="checkbox" id="setTutorial" />
+            <span>Tutorial</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <button class="primary" id="btnSettingsClose">Close</button>
+        </div>
+
         <p class="fine">
-          Pro tip: “Perfect” is a tight window. Learn the pulse, don’t chase the ring.
+          Note: iOS Safari often does not support vibration. If it doesn’t vibrate, this toggle won’t have an effect.
         </p>
       </div>
     </div>
+
+    <!-- TOAST -->
+    <div class="toast" id="toast" aria-live="polite"></div>
 
   </div>
 
