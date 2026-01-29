@@ -1,4 +1,4 @@
-// game.js (FULL)
+// game.js
 (() => {
   "use strict";
 
@@ -68,7 +68,7 @@
       reduceMotion: false,
       skin: "aqua"
     },
-    achievements: {}
+    achievements: {} // id -> true
   };
 
   const loadSave = () => {
@@ -102,21 +102,21 @@
     { id: "blueberry", name: "Berry", ring: "linear-gradient(135deg, rgba(83,199,255,.30), rgba(11,15,42,.10))", core: "linear-gradient(135deg, rgba(83,199,255,.60), rgba(255,79,163,.20))" }
   ];
 
-  function applySkin(id) {
+  function applySkin(id){
     const skin = SKINS.find(s => s.id === id) || SKINS[0];
     save.settings.skin = skin.id;
     persist();
 
+    // Update CSS by setting inline styles on target parts
     const ring = targetEl.querySelector(".target__ring");
     const core = targetEl.querySelector(".target__core");
-    if (ring) ring.style.background = `radial-gradient(circle at 30% 25%, rgba(255,255,255,.35), transparent 60%), ${skin.ring}`;
-    if (core) core.style.background = `radial-gradient(circle at 35% 35%, rgba(255,255,255,.65), rgba(255,255,255,.08) 55%, rgba(0,0,0,.18) 100%), ${skin.core}`;
+    ring.style.background = `radial-gradient(circle at 30% 25%, rgba(255,255,255,.35), transparent 60%), ${skin.ring}`;
+    core.style.background = `radial-gradient(circle at 35% 35%, rgba(255,255,255,.65), rgba(255,255,255,.08) 55%, rgba(0,0,0,.18) 100%), ${skin.core}`;
   }
 
-  function buildSkinGrid() {
-    if (!skinGrid) return;
+  function buildSkinGrid(){
     skinGrid.innerHTML = "";
-    for (const s of SKINS) {
+    for(const s of SKINS){
       const btn = document.createElement("button");
       btn.className = "skin";
       if (s.id === save.settings.skin) btn.classList.add("skin--active");
@@ -129,6 +129,7 @@
         applySkin(s.id);
         [...skinGrid.querySelectorAll(".skin")].forEach(x => x.classList.remove("skin--active"));
         btn.classList.add("skin--active");
+        // small confetti pop
         burstConfetti(state.target.x, state.target.y, 14);
       });
       skinGrid.appendChild(btn);
@@ -139,15 +140,15 @@
      ACHIEVEMENTS
   ========================= */
   const ACH = [
-    { id: "first_hit", name: "First Blood", desc: "Land your first hit.", test: () => state.stats.hits >= 1 },
-    { id: "combo_10", name: "Combo x10", desc: "Reach 10 combo.", test: () => state.combo >= 10 || save.bestCombo >= 10 },
-    { id: "combo_25", name: "Combo x25", desc: "Reach 25 combo.", test: () => state.combo >= 25 || save.bestCombo >= 25 },
-    { id: "perfect_5", name: "Clean!", desc: "Get 5 Perfect in one run.", test: () => state.stats.perfect >= 5 },
-    { id: "survivor", name: "Survivor", desc: "Play 60 seconds without losing all hearts.", test: () => state.timeAlive >= 60 && state.lives > 0 },
-    { id: "rich_100", name: "Pocket Money", desc: "Collect 100 coins total.", test: () => save.coins >= 100 }
+    { id:"first_hit", name:"First Blood", desc:"Land your first hit.", test: () => state.stats.hits >= 1 },
+    { id:"combo_10", name:"Combo x10", desc:"Reach 10 combo.", test: () => state.combo >= 10 || save.bestCombo >= 10 },
+    { id:"combo_25", name:"Combo x25", desc:"Reach 25 combo.", test: () => state.combo >= 25 || save.bestCombo >= 25 },
+    { id:"perfect_5", name:"Clean!", desc:"Get 5 Perfect in one run.", test: () => state.stats.perfect >= 5 },
+    { id:"survivor", name:"Survivor", desc:"Play 60 seconds without losing all hearts.", test: () => state.timeAlive >= 60 && state.lives > 0 },
+    { id:"rich_100", name:"Pocket Money", desc:"Collect 100 coins total.", test: () => save.coins >= 100 }
   ];
 
-  function unlock(id) {
+  function unlock(id){
     if (save.achievements[id]) return;
     save.achievements[id] = true;
     persist();
@@ -155,16 +156,15 @@
     burstConfetti(state.target.x, state.target.y, 26);
   }
 
-  function checkAchievements() {
-    for (const a of ACH) {
+  function checkAchievements(){
+    for(const a of ACH){
       if (!save.achievements[a.id] && a.test()) unlock(a.id);
     }
   }
 
-  function renderAchievements() {
-    if (!achList) return;
+  function renderAchievements(){
     achList.innerHTML = "";
-    for (const a of ACH) {
+    for(const a of ACH){
       const done = !!save.achievements[a.id];
       const row = document.createElement("div");
       row.className = "ach" + (done ? " ach--done" : "");
@@ -184,7 +184,7 @@
   ========================= */
   let audio = null;
 
-  function audioInit() {
+  function audioInit(){
     if (audio) return;
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -192,30 +192,32 @@
     master.gain.value = 0.7;
     master.connect(ctx.destination);
 
+    // mix busses
     const drums = ctx.createGain(); drums.gain.value = 0.55; drums.connect(master);
-    const bass = ctx.createGain(); bass.gain.value = 0.45; bass.connect(master);
-    const lead = ctx.createGain(); lead.gain.value = 0.38; lead.connect(master);
-    const pad = ctx.createGain(); pad.gain.value = 0.28; pad.connect(master);
+    const bass  = ctx.createGain(); bass.gain.value  = 0.45; bass.connect(master);
+    const lead  = ctx.createGain(); lead.gain.value  = 0.38; lead.connect(master);
+    const pad   = ctx.createGain(); pad.gain.value   = 0.28; pad.connect(master);
 
+    // noise buffer for hats
     const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 1.0, ctx.sampleRate);
     {
       const data = noiseBuf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.6;
+      for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * 0.6;
     }
 
-    function hitKick(t) {
+    function hitKick(t){
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(150, t);
-      osc.frequency.exponentialRampToValueAtTime(55, t + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(55, t+0.08);
       g.gain.setValueAtTime(1.0, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      g.gain.exponentialRampToValueAtTime(0.001, t+0.12);
       osc.connect(g); g.connect(drums);
-      osc.start(t); osc.stop(t + 0.13);
+      osc.start(t); osc.stop(t+0.13);
     }
 
-    function hitHat(t) {
+    function hitHat(t){
       const src = ctx.createBufferSource();
       src.buffer = noiseBuf;
       const bp = ctx.createBiquadFilter();
@@ -223,12 +225,12 @@
       bp.frequency.value = 5500;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.22, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, t+0.05);
       src.connect(bp); bp.connect(g); g.connect(drums);
-      src.start(t); src.stop(t + 0.06);
+      src.start(t); src.stop(t+0.06);
     }
 
-    function hitClap(t) {
+    function hitClap(t){
       const src = ctx.createBufferSource();
       src.buffer = noiseBuf;
       const bp = ctx.createBiquadFilter();
@@ -236,25 +238,25 @@
       bp.frequency.value = 1800;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.35, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+      g.gain.exponentialRampToValueAtTime(0.001, t+0.10);
       src.connect(bp); bp.connect(g); g.connect(drums);
-      src.start(t); src.stop(t + 0.12);
+      src.start(t); src.stop(t+0.12);
     }
 
-    function note(bus, freq, t, dur, type = "sine", gain = 0.18) {
+    function note(bus, freq, t, dur, type="sine", gain=0.18){
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       osc.type = type;
       osc.frequency.setValueAtTime(freq, t);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(gain, t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      g.gain.exponentialRampToValueAtTime(gain, t+0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
       osc.connect(g); g.connect(bus);
-      osc.start(t); osc.stop(t + dur + 0.02);
+      osc.start(t); osc.stop(t+dur+0.02);
     }
 
-    const scale = [0, 2, 4, 7, 9];
-    function midiToHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+    const scale = [0,2,4,7,9]; // pentatonic
+    function midiToHz(m){ return 440 * Math.pow(2, (m-69)/12); }
 
     audio = {
       ctx, master, drums, bass, lead, pad,
@@ -265,56 +267,70 @@
     };
   }
 
-  function audioStart() {
+  function audioStart(){
     if (!save.settings.music) return;
     audioInit();
     if (audio.ctx.state !== "running") audio.ctx.resume();
     audio.startedAt = audio.ctx.currentTime;
     audio.nextStepTime = audio.ctx.currentTime + 0.05;
     audio.step = 0;
-    audio.master.gain.setTargetAtTime(0.7, audio.ctx.currentTime, 0.03);
   }
 
-  function audioStop() {
+  function audioStop(){
     if (!audio) return;
+    // Just silence fast (keep context)
     audio.master.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.03);
+    setTimeout(() => {
+      if (!audio) return;
+      audio.master.gain.setTargetAtTime(0.7, audio.ctx.currentTime, 0.03);
+    }, 80);
   }
 
-  function audioTick() {
+  function audioTick(){
     if (!audio || !save.settings.music) return;
 
     const ctx = audio.ctx;
     const now = ctx.currentTime;
 
-    while (audio.nextStepTime < now + 0.12) {
+    // schedule ahead
+    while (audio.nextStepTime < now + 0.12){
       const t = audio.nextStepTime;
-      const vibe = state.vibeStage;
+
+      // Pattern varies by "vibe stage"
+      const vibe = state.vibeStage; // 0 verse, 1 pre, 2 chorus
       const s = audio.step % 16;
 
+      // drums
       if (s % 4 === 0) audio.hitKick(t);
       if (s % 2 === 0) audio.hitHat(t);
       if (vibe >= 1 && (s === 4 || s === 12)) audio.hitClap(t);
 
-      const root = 50 + (vibe === 2 ? 5 : 0);
-      if (s % 4 === 0) audio.note(audio.bass, audio.midiToHz(root), t, 0.16, "triangle", 0.18);
+      // bass
+      const root = 50 + (vibe === 2 ? 5 : 0); // gets a bit higher in chorus
+      if (s % 4 === 0){
+        audio.note(audio.bass, audio.midiToHz(root), t, 0.16, "triangle", 0.18);
+      }
 
+      // lead melody becomes richer with combo/chorus
       const baseM = 62 + (vibe === 2 ? 2 : 0);
       const pick = audio.scale[(s + vibe) % audio.scale.length];
-      if (vibe >= 1 && (s === 2 || s === 6 || s === 10 || s === 14)) {
+      if (vibe >= 1 && (s === 2 || s === 6 || s === 10 || s === 14)){
         audio.note(audio.lead, audio.midiToHz(baseM + pick), t, 0.12, "sawtooth", 0.09);
       }
-      if (vibe >= 2 && (s === 1 || s === 9)) {
+      if (vibe >= 2 && (s === 1 || s === 9)){
         audio.note(audio.lead, audio.midiToHz(baseM + pick + 12), t, 0.09, "square", 0.05);
       }
 
-      if (s === 0) {
+      // pad (gentle)
+      if (s === 0){
         const m = 57 + (vibe === 2 ? 2 : 0);
         audio.note(audio.pad, audio.midiToHz(m), t, 0.45, "sine", 0.05);
-        audio.note(audio.pad, audio.midiToHz(m + 7), t, 0.45, "sine", 0.04);
+        audio.note(audio.pad, audio.midiToHz(m+7), t, 0.45, "sine", 0.04);
       }
 
+      // advance time by current bpm
       const spb = 60 / state.bpm;
-      audio.nextStepTime += spb / 4;
+      audio.nextStepTime += spb / 4; // 16th note grid
       audio.step++;
     }
   }
@@ -323,45 +339,55 @@
      GAME STATE
   ========================= */
   const state = {
-    mode: "menu",
+    mode: "menu", // splash | menu | game
     running: false,
 
+    // scoring
     score: 0,
     combo: 0,
     streak: 0,
     coins: save.coins,
     lives: 3,
 
+    // tempo/progression
     bpm: 80,
     level: 1,
-    energy: 0,
-    vibeStage: 0,
+    energy: 0, // 0..100
+    vibeStage: 0, // 0 verse, 1 pre, 2 chorus
     timeAlive: 0,
 
+    // timing
     beatStart: 0,
+    lastBeatTime: 0,
+    beatIndex: 0,
 
+    // target motion
     bounds: { w: 0, h: 0 },
     target: { x: 0, y: 0, r: 85 },
     targetTo: { x: 0, y: 0 },
 
+    // stats
     stats: { hits: 0, miss: 0, perfect: 0, great: 0, good: 0 },
 
+    // animations
     lastFrame: performance.now(),
     reduceMotion: !!save.settings.reduceMotion
   };
 
-  function resetRun() {
+  function resetRun(){
     state.running = false;
     state.score = 0;
     state.combo = 0;
     state.streak = 0;
     state.lives = 3;
-    state.bpm = 80;
+    state.bpm = 80;          // start slower
     state.level = 1;
     state.energy = 0;
     state.vibeStage = 0;
     state.timeAlive = 0;
+
     state.stats = { hits: 0, miss: 0, perfect: 0, great: 0, good: 0 };
+
     updateHUD(true);
     buildLives();
   }
@@ -369,17 +395,16 @@
   /* =========================
      HUD/UI
   ========================= */
-  function buildLives() {
-    if (!livesEl) return;
+  function buildLives(){
     livesEl.innerHTML = "";
-    for (let i = 0; i < 3; i++) {
+    for(let i=0;i<3;i++){
       const h = document.createElement("div");
       h.className = "heart" + (i < state.lives ? "" : " heart--off");
       livesEl.appendChild(h);
     }
   }
 
-  function updateLives() {
+  function updateLives(){
     const hearts = [...livesEl.querySelectorAll(".heart")];
     hearts.forEach((h, i) => {
       if (i < state.lives) h.classList.remove("heart--off");
@@ -387,54 +412,53 @@
     });
   }
 
-  function updateHUD(full = false) {
-    if (scoreEl) scoreEl.textContent = Math.floor(state.score);
-    if (comboEl) comboEl.textContent = state.combo;
-    if (coinsEl) coinsEl.textContent = state.coins;
-    if (bpmEl) bpmEl.textContent = Math.round(state.bpm);
-    if (levelEl) levelEl.textContent = state.level;
+  function updateHUD(full=false){
+    scoreEl.textContent = Math.floor(state.score);
+    comboEl.textContent = state.combo;
+    coinsEl.textContent = state.coins;
+    bpmEl.textContent = Math.round(state.bpm);
+    levelEl.textContent = state.level;
 
-    if (vibeEl) vibeEl.textContent = state.vibeStage === 0 ? "Verse" : (state.vibeStage === 1 ? "Build" : "Chorus");
-    if (energyFill) energyFill.style.width = `${Math.max(0, Math.min(100, state.energy))}%`;
-    if (energyPctEl) energyPctEl.textContent = `${Math.round(state.energy)}%`;
-    if (streakEl) streakEl.textContent = state.streak;
+    vibeEl.textContent = state.vibeStage === 0 ? "Verse" : (state.vibeStage === 1 ? "Build" : "Chorus");
+    energyFill.style.width = `${Math.max(0, Math.min(100, state.energy))}%`;
+    energyPctEl.textContent = `${Math.round(state.energy)}%`;
+    streakEl.textContent = state.streak;
 
     if (full) updateLives();
   }
 
-  function showJudgement(text, kind) {
-    const cls =
-      kind === "perfect" ? "pop pop--perfect" :
-      kind === "great" ? "pop pop--great" :
-      kind === "good" ? "pop pop--good" :
-      "pop pop--miss";
+  function showJudgement(text, kind){
+    // kind: perfect|great|good|miss|unlocked
+    const cls = kind === "perfect" ? "pop pop--perfect"
+              : kind === "great" ? "pop pop--great"
+              : kind === "good" ? "pop pop--good"
+              : "pop pop--miss";
 
-    if (!judgementEl) return;
     judgementEl.innerHTML = `<div class="${cls}">${text}</div>`;
+    // auto clear
     setTimeout(() => {
-      if (judgementEl && judgementEl.innerHTML.includes(text)) judgementEl.innerHTML = "";
+      if (judgementEl.innerHTML.includes(text)) judgementEl.innerHTML = "";
     }, 520);
   }
 
-  function openModal(modal) {
-    if (!modal) return;
+  function openModal(modal){
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
   }
-  function closeModal(modal) {
-    if (!modal) return;
+  function closeModal(modal){
     modal.classList.add("hidden");
     modal.setAttribute("aria-hidden", "true");
   }
 
-  function showScreen(name) {
-    if (screenSplash) screenSplash.setAttribute("aria-hidden", "true");
-    if (screenMenu) screenMenu.setAttribute("aria-hidden", "true");
-    if (screenGame) screenGame.setAttribute("aria-hidden", "true");
+  function showScreen(name){
+    // hide all
+    screenSplash.setAttribute("aria-hidden", "true");
+    screenMenu.setAttribute("aria-hidden", "true");
+    screenGame.setAttribute("aria-hidden", "true");
 
-    if (name === "splash" && screenSplash) screenSplash.setAttribute("aria-hidden", "false");
-    if (name === "menu" && screenMenu) screenMenu.setAttribute("aria-hidden", "false");
-    if (name === "game" && screenGame) screenGame.setAttribute("aria-hidden", "false");
+    if (name === "splash") screenSplash.setAttribute("aria-hidden", "false");
+    if (name === "menu") screenMenu.setAttribute("aria-hidden", "false");
+    if (name === "game") screenGame.setAttribute("aria-hidden", "false");
     state.mode = name;
   }
 
@@ -442,70 +466,70 @@
      PARTICLES (canvas background)
   ========================= */
   let particles = [];
-
-  function resizeFx() {
+  function resizeFx(){
     const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     fxCanvas.width = Math.floor(window.innerWidth * dpr);
     fxCanvas.height = Math.floor(window.innerHeight * dpr);
     fxCanvas.style.width = "100%";
     fxCanvas.style.height = "100%";
-    fx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fx.setTransform(dpr,0,0,dpr,0,0);
   }
 
-  function seedStars() {
+  function seedStars(){
     particles = [];
     const count = state.reduceMotion ? 60 : 140;
-    for (let i = 0; i < count; i++) {
+    for(let i=0;i<count;i++){
       particles.push({
-        x: Math.random() * window.innerWidth,
-        y: Math.random() * window.innerHeight,
-        vx: (Math.random() * 2 - 1) * 0.06,
-        vy: (Math.random() * 2 - 1) * 0.06,
-        r: Math.random() * 1.6 + 0.6,
-        a: Math.random() * 0.6 + 0.25,
-        hue: [165, 200, 325][Math.floor(Math.random() * 3)]
+        x: Math.random()*window.innerWidth,
+        y: Math.random()*window.innerHeight,
+        vx: (Math.random()*2-1)*0.06,
+        vy: (Math.random()*2-1)*0.06,
+        r: Math.random()*1.6 + 0.6,
+        a: Math.random()*0.6 + 0.25,
+        hue: [165, 200, 325][Math.floor(Math.random()*3)]
       });
     }
   }
 
-  function burstConfetti(x, y, n = 18) {
+  function burstConfetti(x, y, n=18){
     if (state.reduceMotion) return;
     const now = performance.now();
-    for (let i = 0; i < n; i++) {
+    for(let i=0;i<n;i++){
       particles.push({
         x, y,
-        vx: (Math.random() * 2 - 1) * 2.2,
-        vy: (Math.random() * 2 - 1) * 2.2 - 1.8,
-        r: Math.random() * 2.2 + 1.2,
+        vx: (Math.random()*2-1)*2.2,
+        vy: (Math.random()*2-1)*2.2 - 1.8,
+        r: Math.random()*2.2 + 1.2,
         a: 0.95,
-        hue: [165, 200, 325, 40][Math.floor(Math.random() * 4)],
-        life: 700 + Math.random() * 450,
+        hue: [165, 200, 325, 40][Math.floor(Math.random()*4)],
+        life: 700 + Math.random()*450,
         born: now,
         confetti: true
       });
     }
   }
 
-  function drawFx(dt) {
-    fx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  function drawFx(dt){
+    fx.clearRect(0,0,window.innerWidth,window.innerHeight);
 
+    // soft glow overlays
     fx.globalCompositeOperation = "source-over";
     fx.fillStyle = "rgba(255,255,255,0.02)";
-    fx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+    fx.fillRect(0,0,window.innerWidth,window.innerHeight);
 
     const now = performance.now();
 
-    for (let i = particles.length - 1; i >= 0; i--) {
+    for(let i=particles.length-1;i>=0;i--){
       const p = particles[i];
 
-      if (p.confetti) {
+      if (p.confetti){
         const age = now - p.born;
         const t = age / p.life;
-        if (t >= 1) {
-          particles.splice(i, 1);
+        if (t >= 1){
+          particles.splice(i,1);
           continue;
         }
-        p.vy += 0.012;
+        p.vy += 0.012; // gravity
         p.x += p.vx;
         p.y += p.vy;
         p.a = 0.95 * (1 - t);
@@ -514,12 +538,13 @@
         fx.globalAlpha = p.a;
         fx.fillStyle = `hsla(${p.hue}, 90%, 65%, 1)`;
         fx.translate(p.x, p.y);
-        fx.rotate((age / 120) % (Math.PI * 2));
-        fx.fillRect(-p.r, -p.r, p.r * 2.2, p.r * 1.2);
+        fx.rotate((age/120) % (Math.PI*2));
+        fx.fillRect(-p.r, -p.r, p.r*2.2, p.r*1.2);
         fx.restore();
         continue;
       }
 
+      // star drift
       p.x += p.vx * dt;
       p.y += p.vy * dt;
 
@@ -531,10 +556,9 @@
       fx.globalAlpha = p.a;
       fx.fillStyle = `hsla(${p.hue}, 85%, 75%, 1)`;
       fx.beginPath();
-      fx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      fx.arc(p.x, p.y, p.r, 0, Math.PI*2);
       fx.fill();
     }
-
     fx.globalAlpha = 1;
   }
 
@@ -542,55 +566,53 @@
      DISTRACTORS (DOM)
   ========================= */
   let distractors = [];
-
-  function spawnDistractor() {
+  function spawnDistractor(){
     if (state.reduceMotion) return;
-    if (!distractorsEl) return;
-
     const el = document.createElement("div");
     el.className = "distractor";
-
-    const y = 60 + Math.random() * (state.bounds.h - 120);
+    const y = 60 + Math.random()*(state.bounds.h - 120);
     const dir = Math.random() < 0.5 ? -1 : 1;
     const x = dir < 0 ? state.bounds.w + 80 : -80;
-    const speed = 70 + Math.random() * 140;
+    const speed = 70 + Math.random()*140;
 
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
     distractorsEl.appendChild(el);
 
-    distractors.push({ el, x, y, dir, speed });
+    distractors.push({ el, x, y, dir, speed, born: performance.now() });
   }
 
-  function updateDistractors(dt) {
-    for (let i = distractors.length - 1; i >= 0; i--) {
+  function updateDistractors(dt){
+    for(let i=distractors.length-1;i>=0;i--){
       const d = distractors[i];
       d.x += d.dir * d.speed * dt;
-      d.el.style.transform = `translate(${d.x}px, ${d.y}px) rotate(${(performance.now() / 400) % 360}deg)`;
-      if ((d.dir < 0 && d.x < -160) || (d.dir > 0 && d.x > state.bounds.w + 160)) {
+      d.el.style.transform = `translate(${d.x}px, ${d.y}px) rotate(${(performance.now()/400)%360}deg)`;
+      if ((d.dir < 0 && d.x < -160) || (d.dir > 0 && d.x > state.bounds.w + 160)){
         d.el.remove();
-        distractors.splice(i, 1);
+        distractors.splice(i,1);
       }
     }
-    if (distractors.length > 6) {
+    // limit nodes
+    if (distractors.length > 6){
       const d = distractors.shift();
       d.el.remove();
     }
   }
 
   /* =========================
-     TARGET MOTION
+     TARGET MOTION (smooth glide)
   ========================= */
-  function measureBounds() {
-    if (!playfield) return;
+  function measureBounds(){
     const r = playfield.getBoundingClientRect();
     state.bounds.w = r.width;
     state.bounds.h = r.height;
 
+    // radius depends on screen
     const base = Math.min(r.width, r.height);
     state.target.r = Math.max(62, Math.min(92, base * 0.17));
 
-    if (!state.target.x && !state.target.y) {
+    // keep initial in view
+    if (!state.target.x && !state.target.y){
       state.target.x = r.width * 0.55;
       state.target.y = r.height * 0.55;
       state.targetTo.x = state.target.x;
@@ -598,57 +620,58 @@
     }
   }
 
-  function pickNewTarget() {
+  function pickNewTarget(){
     const pad = state.target.r + 22;
-    const x = pad + Math.random() * (state.bounds.w - pad * 2);
-    const y = pad + Math.random() * (state.bounds.h - pad * 2);
+    const x = pad + Math.random()*(state.bounds.w - pad*2);
+    const y = pad + Math.random()*(state.bounds.h - pad*2);
     state.targetTo.x = x;
     state.targetTo.y = y;
   }
 
-  function renderTarget() {
-    if (!targetEl) return;
+  function renderTarget(){
     targetEl.style.transform = `translate(${state.target.x - state.target.r}px, ${state.target.y - state.target.r}px)`;
-    targetEl.style.width = `${state.target.r * 2}px`;
-    targetEl.style.height = `${state.target.r * 2}px`;
-
-    const core = targetEl.querySelector(".target__core");
-    if (core) core.style.inset = `${Math.max(26, state.target.r * 0.42)}px`;
+    targetEl.style.width = `${state.target.r*2}px`;
+    targetEl.style.height = `${state.target.r*2}px`;
+    targetEl.querySelector(".target__core").style.inset = `${Math.max(26, state.target.r*0.42)}px`;
   }
 
-  function updateTarget(dt) {
+  function updateTarget(dt){
+    // glide: exponential smoothing, never "teleport"
     const speed = state.reduceMotion ? 5.5 : 7.5;
     state.target.x += (state.targetTo.x - state.target.x) * (1 - Math.exp(-speed * dt));
     state.target.y += (state.targetTo.y - state.target.y) * (1 - Math.exp(-speed * dt));
+
     renderTarget();
   }
 
   /* =========================
-     HIT WINDOWS
+     TIMING / HIT WINDOW
+     (bigger window -> fewer false MISS)
   ========================= */
-  function hitWindowMs() {
-    const perfect = Math.max(110, 140 - (state.level - 1) * 6);
-    const great = Math.max(200, 240 - (state.level - 1) * 8);
-    const good = Math.max(260, 300 - (state.level - 1) * 6);
+  function hitWindowMs(){
+    // easier: keep generous windows, only slightly tighter on higher levels
+    const perfect = Math.max(110, 140 - (state.level-1)*6); // ms
+    const great   = Math.max(200, 240 - (state.level-1)*8); // ms
+    const good    = Math.max(260, 300 - (state.level-1)*6); // ms
     return { perfect, great, good };
   }
 
-  function nearestBeatDeltaMs(nowMs) {
+  function nearestBeatDeltaMs(nowMs){
     const spb = 60000 / state.bpm;
     const sinceStart = nowMs - state.beatStart;
     const beatFloat = sinceStart / spb;
     const nearest = Math.round(beatFloat);
     const nearestTime = state.beatStart + nearest * spb;
-    return nowMs - nearestTime;
+    return nowMs - nearestTime; // signed
   }
 
-  function inCircle(px, py) {
+  function inCircle(px, py){
     const dx = px - state.target.x;
     const dy = py - state.target.y;
-    return (dx * dx + dy * dy) <= (state.target.r * state.target.r);
+    return (dx*dx + dy*dy) <= (state.target.r * state.target.r);
   }
 
-  function haptic(kind) {
+  function haptic(kind){
     if (!save.settings.haptics) return;
     if (!navigator.vibrate) return;
     if (kind === "perfect") navigator.vibrate([12]);
@@ -657,18 +680,19 @@
     else navigator.vibrate([20, 30, 20]);
   }
 
-  function addCoins(n) {
+  function addCoins(n){
     state.coins += n;
     save.coins = state.coins;
     persist();
   }
 
-  function onHit(kind) {
+  function onHit(kind){
     state.stats.hits++;
     state.combo++;
     state.streak++;
     save.bestCombo = Math.max(save.bestCombo, state.combo);
 
+    // score + energy + coins
     const mult = 1 + Math.min(2.5, state.combo / 18);
     const add = kind === "perfect" ? 120 : kind === "great" ? 80 : 45;
     state.score += add * mult;
@@ -684,14 +708,19 @@
     else state.stats.good++;
 
     showJudgement(kind.toUpperCase(), kind);
+
+    // burst effect
     burstConfetti(state.target.x, state.target.y, kind === "perfect" ? 26 : 14);
 
+    // progression: bpm ramps with combo + time
     if (state.combo % 3 === 0) state.bpm = Math.min(160, state.bpm + 1.5);
-    if (state.combo % 2 === 0) pickNewTarget();
+    if (state.combo % 10 === 0) pickNewTarget();
 
+    // Vibe stages based on combo/energy
     if (state.combo >= 18 || state.energy >= 45) state.vibeStage = 1;
     if (state.combo >= 35 || state.energy >= 75) state.vibeStage = 2;
 
+    // Level
     state.level = 1 + Math.floor(state.score / 2000);
 
     checkAchievements();
@@ -699,28 +728,33 @@
     haptic(kind);
   }
 
-  function onMiss(reason = "MISS") {
+  function onMiss(reason="MISS"){
     state.stats.miss++;
     state.combo = 0;
     state.streak = 0;
 
+    // lose heart, but do not reset whole run/music
     state.lives = Math.max(0, state.lives - 1);
     updateLives();
 
     showJudgement(reason, "miss");
     haptic("miss");
 
+    // drop energy
     state.energy = Math.max(0, state.energy - 10);
+
+    // make it a bit easier after miss
     state.bpm = Math.max(78, state.bpm - 2.5);
 
-    if (state.lives <= 0) {
+    if (state.lives <= 0){
       endRun();
       return;
     }
+
     updateHUD();
   }
 
-  function judgeTap(dtMs) {
+  function judgeTap(dtMs){
     const { perfect, great, good } = hitWindowMs();
     const a = Math.abs(dtMs);
 
@@ -733,7 +767,7 @@
   /* =========================
      RUN LOOP
   ========================= */
-  function startRun() {
+  function startRun(){
     resetRun();
     state.running = true;
 
@@ -742,24 +776,30 @@
     buildSkinGrid();
 
     state.beatStart = performance.now();
+    state.lastBeatTime = state.beatStart;
+    state.beatIndex = 0;
 
+    // target initial + first destination
     pickNewTarget();
     renderTarget();
 
+    // audio
     audioStart();
 
-    if (distractorsEl) distractorsEl.innerHTML = "";
+    // spawn distractors slowly at first
+    distractorsEl.innerHTML = "";
     distractors = [];
 
     updateHUD(true);
 
-    if (!save.seenTutorial && tutorial) {
+    // show tutorial once
+    if (!save.seenTutorial){
       tutorial.classList.remove("hidden");
-      tutorial.setAttribute("aria-hidden", "false");
+      tutorial.setAttribute("aria-hidden","false");
     }
   }
 
-  function endRun() {
+  function endRun(){
     state.running = false;
 
     save.bestScore = Math.max(save.bestScore, Math.floor(state.score));
@@ -768,27 +808,39 @@
 
     audioStop();
     renderAchievements();
+
+    // go menu
     showScreen("menu");
   }
 
-  function frame(now) {
+  function frame(now){
     const dt = Math.min(0.04, (now - state.lastFrame) / 1000);
     state.lastFrame = now;
 
     drawFx(dt * 60);
 
-    if (state.mode === "game" && state.running) {
+    if (state.mode === "game" && state.running){
       state.timeAlive += dt;
 
+      // choose new target slowly over time even without combo
       if (!state.reduceMotion && Math.random() < dt * 0.08) spawnDistractor();
+      if (Math.random() < dt * 0.15 && state.combo < 6) {
+        // gentle movement early game
+        if ((now - state.beatStart) > 2500 && Math.random() < 0.03) pickNewTarget();
+      }
 
+      // energy decay (slow)
       state.energy = Math.max(0, state.energy - dt * 1.15);
+
+      // bpm slowly increases with time (very light)
       state.bpm = Math.min(160, state.bpm + dt * 0.25);
 
       updateTarget(dt);
       updateDistractors(dt);
 
+      // audio scheduling
       audioTick();
+
       updateHUD();
       checkAchievements();
     }
@@ -799,20 +851,21 @@
   /* =========================
      INPUT
   ========================= */
-  function getPointerPos(e) {
+  function getPointerPos(e){
     const r = playfield.getBoundingClientRect();
     const x = (e.clientX ?? (e.touches && e.touches[0].clientX)) - r.left;
     const y = (e.clientY ?? (e.touches && e.touches[0].clientY)) - r.top;
     return { x, y };
   }
 
-  function onPointerDown(e) {
+  function onPointerDown(e){
     if (state.mode !== "game" || !state.running) return;
     e.preventDefault();
 
     const p = getPointerPos(e);
 
-    if (!inCircle(p.x, p.y)) {
+    // MUST tap in circle
+    if (!inCircle(p.x, p.y)){
       onMiss("MISS");
       return;
     }
@@ -820,113 +873,130 @@
     const dtMs = nearestBeatDeltaMs(performance.now());
     const res = judgeTap(dtMs);
 
-    if (res === "miss") {
+    if (res === "miss"){
       onMiss("MISS");
       return;
     }
+
     onHit(res);
+
+    // little move as reward: target “slides” to new location more often when you hit
+    if (state.combo % 2 === 0) pickNewTarget();
   }
 
-  if (playfield) {
-    playfield.addEventListener("pointerdown", onPointerDown, { passive: false });
-    playfield.addEventListener("touchstart", onPointerDown, { passive: false });
-  }
+  playfield.addEventListener("pointerdown", onPointerDown, { passive:false });
+  playfield.addEventListener("touchstart", onPointerDown, { passive:false });
 
   /* =========================
      MENU + MODALS + SETTINGS
   ========================= */
-  function wireModalClose(modal) {
-    if (!modal) return;
+  function wireModalClose(modal){
     modal.addEventListener("click", (e) => {
       const t = e.target;
       if (t && t.getAttribute && t.getAttribute("data-close") === "1") closeModal(modal);
     });
   }
+
   wireModalClose(modalSettings);
   wireModalClose(modalShop);
   wireModalClose(modalAchievements);
 
-  function syncSettingsUI() {
-    if (toggleMusic) toggleMusic.checked = !!save.settings.music;
-    if (toggleHaptics) toggleHaptics.checked = !!save.settings.haptics;
-    if (toggleReduceMotion) toggleReduceMotion.checked = !!save.settings.reduceMotion;
+  function syncSettingsUI(){
+    toggleMusic.checked = !!save.settings.music;
+    toggleHaptics.checked = !!save.settings.haptics;
+    toggleReduceMotion.checked = !!save.settings.reduceMotion;
   }
 
-  if (toggleMusic) toggleMusic.addEventListener("change", () => {
+  toggleMusic.addEventListener("change", () => {
     save.settings.music = toggleMusic.checked;
     persist();
     if (!save.settings.music) audioStop();
     else if (state.mode === "game" && state.running) audioStart();
   });
 
-  if (toggleHaptics) toggleHaptics.addEventListener("change", () => {
+  toggleHaptics.addEventListener("change", () => {
     save.settings.haptics = toggleHaptics.checked;
     persist();
   });
 
-  if (toggleReduceMotion) toggleReduceMotion.addEventListener("change", () => {
+  toggleReduceMotion.addEventListener("change", () => {
     save.settings.reduceMotion = toggleReduceMotion.checked;
     state.reduceMotion = save.settings.reduceMotion;
     persist();
     seedStars();
   });
 
-  if (btnSettings) btnSettings.addEventListener("click", () => {
+  btnSettings.addEventListener("click", () => {
     syncSettingsUI();
     buildSkinGrid();
     openModal(modalSettings);
   });
 
-  if (btnSettingsMenu) btnSettingsMenu.addEventListener("click", () => {
+  btnSettingsMenu.addEventListener("click", () => {
     syncSettingsUI();
     buildSkinGrid();
     openModal(modalSettings);
   });
 
-  if (btnShopMenu) btnShopMenu.addEventListener("click", () => openModal(modalShop));
-  if (btnAchMenu) btnAchMenu.addEventListener("click", () => {
+  btnShopMenu.addEventListener("click", () => openModal(modalShop));
+  btnAchMenu.addEventListener("click", () => {
     renderAchievements();
     openModal(modalAchievements);
   });
 
-  if (btnBackToMenu) btnBackToMenu.addEventListener("click", () => {
+  btnBackToMenu.addEventListener("click", () => {
     closeModal(modalSettings);
     showScreen("menu");
     state.running = false;
     audioStop();
   });
 
-  if (btnPlay) btnPlay.addEventListener("click", () => {
+  btnPlay.addEventListener("click", () => {
     showScreen("game");
     startRun();
   });
 
-  if (btnTutorialOk) btnTutorialOk.addEventListener("click", () => {
-    if (!tutorial) return;
+  $("#btnSettingsMenu").addEventListener("pointerdown", (e)=>e.stopPropagation());
+  $("#btnPlay").addEventListener("pointerdown", (e)=>e.stopPropagation());
+
+  btnTutorialOk.addEventListener("click", () => {
     tutorial.classList.add("hidden");
-    tutorial.setAttribute("aria-hidden", "true");
+    tutorial.setAttribute("aria-hidden","true");
     save.seenTutorial = true;
     persist();
   });
 
+  // Settings/Shop/Ach from menu (ensure clickable)
+  $("#btnSettingsMenu").addEventListener("click", () => {});
+  $("#btnShopMenu").addEventListener("click", () => {});
+  $("#btnAchMenu").addEventListener("click", () => {});
+
   /* =========================
      STARTUP
   ========================= */
-  function init() {
+  function init(){
+    // screens
     showScreen("splash");
 
+    // apply coins on HUD once you start
     state.coins = save.coins;
 
+    // build lives once
     buildLives();
+
+    // skins + settings
     applySkin(save.settings.skin);
     syncSettingsUI();
     buildSkinGrid();
 
+    // achievements list ready
     renderAchievements();
 
+    // FX
     resizeFx();
     seedStars();
 
+    // resize handlers
     window.addEventListener("resize", () => {
       resizeFx();
       seedStars();
@@ -934,17 +1004,20 @@
       renderTarget();
     });
 
+    // splash duration then menu
     setTimeout(() => {
       showScreen("menu");
     }, 1500);
 
+    // prevent double-tap zoom on iOS
     let lastTouchEnd = 0;
     document.addEventListener("touchend", (e) => {
       const now = Date.now();
       if (now - lastTouchEnd <= 250) e.preventDefault();
       lastTouchEnd = now;
-    }, { passive: false });
+    }, { passive:false });
 
+    // measure playfield after first layout
     setTimeout(() => {
       measureBounds();
       renderTarget();
