@@ -3,10 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <title>TapBeat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+
+<!-- BACKGROUND FX LAYERS -->
+<div class="bg-stars" aria-hidden="true"></div>
+<div class="bg-confetti" aria-hidden="true"></div>
 
 <!-- INTRO -->
 <div id="intro" class="screen active">
@@ -16,7 +20,7 @@
   </div>
 </div>
 
-<!-- MAIN MENU -->
+<!-- MENU -->
 <div id="menu" class="screen">
   <h1 class="logo">TapBeat</h1>
   <button id="playBtn" class="main-btn">PLAY</button>
@@ -25,18 +29,39 @@
 
 <!-- GAME -->
 <div id="game" class="screen">
-  <!-- HUD -->
   <div class="hud">
     <div class="hud-item">SCORE <span id="score">0</span></div>
     <div class="hud-item">COMBO <span id="combo">0</span></div>
     <div class="hud-item">COINS <span id="coins">0</span></div>
-    <div class="hud-item">BPM <span id="bpm">90</span></div>
+    <div class="hud-item">BPM <span id="bpm">72</span></div>
     <div class="hud-item">LV <span id="lvl">1</span></div>
     <button id="gear" class="gear" aria-label="Settings">⚙️</button>
   </div>
 
-  <!-- BIG FEEDBACK (anime style) -->
+  <!-- lives (top-right, but separate from HUD so it feels “in the field”) -->
+  <div id="lives" class="lives" aria-label="Lives"></div>
+
+  <!-- Big anime feedback -->
   <div id="feedback" class="feedback"></div>
+
+  <!-- bottom progress strip -->
+  <div class="bottom-bar">
+    <div class="bar-left">
+      <div class="label">Vibe: <span id="vibe">Verse</span></div>
+    </div>
+    <div class="bar-mid">
+      <div class="energy-wrap">
+        <div class="energy-label">Energy</div>
+        <div class="energy-track">
+          <div id="energyFill" class="energy-fill" style="width:0%"></div>
+        </div>
+        <div class="energy-pct"><span id="energyPct">0</span>%</div>
+      </div>
+    </div>
+    <div class="bar-right">
+      <div class="label">Streak: <span id="streak">0</span></div>
+    </div>
+  </div>
 
   <!-- FIELD -->
   <div id="field" aria-label="play field">
@@ -45,12 +70,14 @@
       <div class="ring ring2"></div>
       <div class="core"></div>
     </div>
+
     <div id="particles"></div>
     <div id="flash"></div>
+    <div id="flybys"></div>
   </div>
 </div>
 
-<!-- SETTINGS MODAL -->
+<!-- SETTINGS -->
 <div id="settings" class="modal">
   <div class="modal-card">
     <div class="modal-head">
@@ -83,7 +110,7 @@
     </div>
 
     <div class="section small">
-      <p><b>Tip:</b> Perfect hits build combo → music gets richer → BPM climbs.</p>
+      <p><b>World:</b> Neon Carnival Stage — stars, confetti, fly-by “notes”. Energy unlocks the “Drop”.</p>
     </div>
   </div>
 </div>
