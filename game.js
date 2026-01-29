@@ -1,1030 +1,894 @@
-// game.js
+/* TapBeat – single-file WebAudio rhythm toy (no external assets)
+   - full-screen field
+   - smooth moving target (lerp)
+   - tap ONLY inside circle counts
+   - wider hit window (configurable)
+   - 3 lives (hearts)
+   - music via WebAudio (verse -> chorus feel)
+   - skins selectable
+   - achievements + coins
+   - confetti / stars FX on canvas
+*/
+
 (() => {
-  "use strict";
+  const $ = (s) => document.querySelector(s);
 
-  /* =========================
-     DOM
-  ========================= */
-  const $ = (sel) => document.querySelector(sel);
+  // Screens
+  const splash = $("#splash");
+  const menu = $("#menu");
+  const game = $("#game");
 
-  const screenSplash = $("#screen-splash");
-  const screenMenu = $("#screen-menu");
-  const screenGame = $("#screen-game");
-
+  // Buttons
   const btnPlay = $("#btnPlay");
-  const btnSettingsMenu = $("#btnSettingsMenu");
-  const btnShopMenu = $("#btnShopMenu");
-  const btnAchMenu = $("#btnAchMenu");
-
-  const playfield = $("#playfield");
-  const targetEl = $("#target");
-  const judgementEl = $("#judgement");
-  const distractorsEl = $("#distractors");
-
-  const scoreEl = $("#score");
-  const comboEl = $("#combo");
-  const coinsEl = $("#coins");
-  const bpmEl = $("#bpm");
-  const levelEl = $("#level");
-  const livesEl = $("#lives");
-
-  const vibeEl = $("#vibe");
-  const energyFill = $("#energyFill");
-  const energyPctEl = $("#energyPct");
-  const streakEl = $("#streak");
-
   const btnSettings = $("#btnSettings");
+  const btnShop = $("#btnShop");
+  const btnAch = $("#btnAch");
+  const gear = $("#gear");
+  const btnBackMenu = $("#btnBackMenu");
+
+  // Modals
+  const backdrop = $("#modalBackdrop");
   const modalSettings = $("#modalSettings");
   const modalShop = $("#modalShop");
-  const modalAchievements = $("#modalAchievements");
+  const modalAch = $("#modalAch");
 
-  const toggleMusic = $("#toggleMusic");
-  const toggleHaptics = $("#toggleHaptics");
-  const toggleReduceMotion = $("#toggleReduceMotion");
+  // Settings inputs
+  const optMusic = $("#optMusic");
+  const optHaptics = $("#optHaptics");
+  const optWindow = $("#optWindow");
   const skinGrid = $("#skinGrid");
 
-  const btnBackToMenu = $("#btnBackToMenu");
+  // HUD
+  const elScore = $("#score");
+  const elCombo = $("#combo");
+  const elCoins = $("#coins");
+  const elBpm = $("#bpm");
+  const elLv = $("#lv");
+  const elVibe = $("#hudVibe");
+  const elEnergyFill = $("#energyFill");
+  const elEnergyPct = $("#energyPct");
+  const elStreak = $("#streak");
 
-  const tutorial = $("#tutorial");
-  const btnTutorialOk = $("#btnTutorialOk");
+  const elVibeMenu = $("#hudVibeMenu");
+  const elEnergyFillMenu = $("#energyFillMenu");
+  const elEnergyPctMenu = $("#energyPctMenu");
+  const elStreakMenu = $("#streakMenu");
 
-  const achList = $("#achList");
+  const h1 = $("#h1"), h2 = $("#h2"), h3 = $("#h3");
 
-  const fxCanvas = $("#fx");
-  const fx = fxCanvas.getContext("2d", { alpha: true });
+  // Playfield
+  const field = $("#field");
+  const ring = $("#ring");
+  const judge = $("#judge");
+  const fly = $("#fly");
 
-  /* =========================
-     SETTINGS + SAVE
-  ========================= */
-  const LS_KEY = "tapbeat_v1";
-  const defaultSave = {
-    coins: 0,
-    bestScore: 0,
-    bestCombo: 0,
-    seenTutorial: false,
-    settings: {
-      music: true,
-      haptics: true,
-      reduceMotion: false,
-      skin: "aqua"
-    },
-    achievements: {} // id -> true
-  };
+  // FX canvas
+  const fx = $("#fx");
+  const ctx = fx.getContext("2d", { alpha: true });
 
-  const loadSave = () => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (!raw) return structuredClone(defaultSave);
-      const parsed = JSON.parse(raw);
-      return {
-        ...structuredClone(defaultSave),
-        ...parsed,
-        settings: { ...structuredClone(defaultSave.settings), ...(parsed.settings || {}) },
-        achievements: { ...(parsed.achievements || {}) }
-      };
-    } catch {
-      return structuredClone(defaultSave);
-    }
-  };
+  // --------- State ----------
+  const LS_KEY = "tapbeat_save_v1";
+  const save = loadSave();
 
-  let save = loadSave();
-  const persist = () => localStorage.setItem(LS_KEY, JSON.stringify(save));
-
-  /* =========================
-     SKINS
-  ========================= */
-  const SKINS = [
-    { id: "aqua", name: "Aqua", ring: "linear-gradient(135deg, rgba(61,255,179,.55), rgba(83,199,255,.25))", core: "linear-gradient(135deg, rgba(61,255,179,.75), rgba(255,79,163,.25))" },
-    { id: "sunset", name: "Sunset", ring: "linear-gradient(135deg, rgba(255,124,92,.35), rgba(255,79,163,.25))", core: "linear-gradient(135deg, rgba(255,228,91,.65), rgba(255,79,163,.28))" },
-    { id: "neon", name: "Neon", ring: "linear-gradient(135deg, rgba(83,199,255,.55), rgba(255,79,163,.25))", core: "linear-gradient(135deg, rgba(83,199,255,.65), rgba(61,255,179,.35))" },
-    { id: "mint", name: "Mint", ring: "linear-gradient(135deg, rgba(61,255,179,.55), rgba(255,255,255,.12))", core: "linear-gradient(135deg, rgba(61,255,179,.80), rgba(83,199,255,.22))" },
-    { id: "rose", name: "Rose", ring: "linear-gradient(135deg, rgba(255,79,163,.35), rgba(255,255,255,.12))", core: "linear-gradient(135deg, rgba(255,79,163,.65), rgba(61,255,179,.22))" },
-    { id: "blueberry", name: "Berry", ring: "linear-gradient(135deg, rgba(83,199,255,.30), rgba(11,15,42,.10))", core: "linear-gradient(135deg, rgba(83,199,255,.60), rgba(255,79,163,.20))" }
-  ];
-
-  function applySkin(id){
-    const skin = SKINS.find(s => s.id === id) || SKINS[0];
-    save.settings.skin = skin.id;
-    persist();
-
-    // Update CSS by setting inline styles on target parts
-    const ring = targetEl.querySelector(".target__ring");
-    const core = targetEl.querySelector(".target__core");
-    ring.style.background = `radial-gradient(circle at 30% 25%, rgba(255,255,255,.35), transparent 60%), ${skin.ring}`;
-    core.style.background = `radial-gradient(circle at 35% 35%, rgba(255,255,255,.65), rgba(255,255,255,.08) 55%, rgba(0,0,0,.18) 100%), ${skin.core}`;
-  }
-
-  function buildSkinGrid(){
-    skinGrid.innerHTML = "";
-    for(const s of SKINS){
-      const btn = document.createElement("button");
-      btn.className = "skin";
-      if (s.id === save.settings.skin) btn.classList.add("skin--active");
-      btn.type = "button";
-      btn.innerHTML = `
-        <div class="skin__dot" style="background:${s.core}"></div>
-        <div class="skin__name">${s.name}</div>
-      `;
-      btn.addEventListener("click", () => {
-        applySkin(s.id);
-        [...skinGrid.querySelectorAll(".skin")].forEach(x => x.classList.remove("skin--active"));
-        btn.classList.add("skin--active");
-        // small confetti pop
-        burstConfetti(state.target.x, state.target.y, 14);
-      });
-      skinGrid.appendChild(btn);
-    }
-  }
-
-  /* =========================
-     ACHIEVEMENTS
-  ========================= */
-  const ACH = [
-    { id:"first_hit", name:"First Blood", desc:"Land your first hit.", test: () => state.stats.hits >= 1 },
-    { id:"combo_10", name:"Combo x10", desc:"Reach 10 combo.", test: () => state.combo >= 10 || save.bestCombo >= 10 },
-    { id:"combo_25", name:"Combo x25", desc:"Reach 25 combo.", test: () => state.combo >= 25 || save.bestCombo >= 25 },
-    { id:"perfect_5", name:"Clean!", desc:"Get 5 Perfect in one run.", test: () => state.stats.perfect >= 5 },
-    { id:"survivor", name:"Survivor", desc:"Play 60 seconds without losing all hearts.", test: () => state.timeAlive >= 60 && state.lives > 0 },
-    { id:"rich_100", name:"Pocket Money", desc:"Collect 100 coins total.", test: () => save.coins >= 100 }
-  ];
-
-  function unlock(id){
-    if (save.achievements[id]) return;
-    save.achievements[id] = true;
-    persist();
-    showJudgement("Unlocked!", "good");
-    burstConfetti(state.target.x, state.target.y, 26);
-  }
-
-  function checkAchievements(){
-    for(const a of ACH){
-      if (!save.achievements[a.id] && a.test()) unlock(a.id);
-    }
-  }
-
-  function renderAchievements(){
-    achList.innerHTML = "";
-    for(const a of ACH){
-      const done = !!save.achievements[a.id];
-      const row = document.createElement("div");
-      row.className = "ach" + (done ? " ach--done" : "");
-      row.innerHTML = `
-        <div>
-          <div class="ach__name">${a.name}</div>
-          <div class="ach__desc">${a.desc}</div>
-        </div>
-        <div class="ach__badge">${done ? "DONE" : "LOCKED"}</div>
-      `;
-      achList.appendChild(row);
-    }
-  }
-
-  /* =========================
-     AUDIO (WebAudio synth)
-  ========================= */
-  let audio = null;
-
-  function audioInit(){
-    if (audio) return;
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    const master = ctx.createGain();
-    master.gain.value = 0.7;
-    master.connect(ctx.destination);
-
-    // mix busses
-    const drums = ctx.createGain(); drums.gain.value = 0.55; drums.connect(master);
-    const bass  = ctx.createGain(); bass.gain.value  = 0.45; bass.connect(master);
-    const lead  = ctx.createGain(); lead.gain.value  = 0.38; lead.connect(master);
-    const pad   = ctx.createGain(); pad.gain.value   = 0.28; pad.connect(master);
-
-    // noise buffer for hats
-    const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 1.0, ctx.sampleRate);
-    {
-      const data = noiseBuf.getChannelData(0);
-      for (let i=0;i<data.length;i++) data[i] = (Math.random()*2-1) * 0.6;
-    }
-
-    function hitKick(t){
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(150, t);
-      osc.frequency.exponentialRampToValueAtTime(55, t+0.08);
-      g.gain.setValueAtTime(1.0, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t+0.12);
-      osc.connect(g); g.connect(drums);
-      osc.start(t); osc.stop(t+0.13);
-    }
-
-    function hitHat(t){
-      const src = ctx.createBufferSource();
-      src.buffer = noiseBuf;
-      const bp = ctx.createBiquadFilter();
-      bp.type = "highpass";
-      bp.frequency.value = 5500;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.22, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t+0.05);
-      src.connect(bp); bp.connect(g); g.connect(drums);
-      src.start(t); src.stop(t+0.06);
-    }
-
-    function hitClap(t){
-      const src = ctx.createBufferSource();
-      src.buffer = noiseBuf;
-      const bp = ctx.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = 1800;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.35, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t+0.10);
-      src.connect(bp); bp.connect(g); g.connect(drums);
-      src.start(t); src.stop(t+0.12);
-    }
-
-    function note(bus, freq, t, dur, type="sine", gain=0.18){
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, t);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(gain, t+0.01);
-      g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
-      osc.connect(g); g.connect(bus);
-      osc.start(t); osc.stop(t+dur+0.02);
-    }
-
-    const scale = [0,2,4,7,9]; // pentatonic
-    function midiToHz(m){ return 440 * Math.pow(2, (m-69)/12); }
-
-    audio = {
-      ctx, master, drums, bass, lead, pad,
-      hitKick, hitHat, hitClap, note, midiToHz, scale,
-      startedAt: 0,
-      nextStepTime: 0,
-      step: 0
-    };
-  }
-
-  function audioStart(){
-    if (!save.settings.music) return;
-    audioInit();
-    if (audio.ctx.state !== "running") audio.ctx.resume();
-    audio.startedAt = audio.ctx.currentTime;
-    audio.nextStepTime = audio.ctx.currentTime + 0.05;
-    audio.step = 0;
-  }
-
-  function audioStop(){
-    if (!audio) return;
-    // Just silence fast (keep context)
-    audio.master.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.03);
-    setTimeout(() => {
-      if (!audio) return;
-      audio.master.gain.setTargetAtTime(0.7, audio.ctx.currentTime, 0.03);
-    }, 80);
-  }
-
-  function audioTick(){
-    if (!audio || !save.settings.music) return;
-
-    const ctx = audio.ctx;
-    const now = ctx.currentTime;
-
-    // schedule ahead
-    while (audio.nextStepTime < now + 0.12){
-      const t = audio.nextStepTime;
-
-      // Pattern varies by "vibe stage"
-      const vibe = state.vibeStage; // 0 verse, 1 pre, 2 chorus
-      const s = audio.step % 16;
-
-      // drums
-      if (s % 4 === 0) audio.hitKick(t);
-      if (s % 2 === 0) audio.hitHat(t);
-      if (vibe >= 1 && (s === 4 || s === 12)) audio.hitClap(t);
-
-      // bass
-      const root = 50 + (vibe === 2 ? 5 : 0); // gets a bit higher in chorus
-      if (s % 4 === 0){
-        audio.note(audio.bass, audio.midiToHz(root), t, 0.16, "triangle", 0.18);
-      }
-
-      // lead melody becomes richer with combo/chorus
-      const baseM = 62 + (vibe === 2 ? 2 : 0);
-      const pick = audio.scale[(s + vibe) % audio.scale.length];
-      if (vibe >= 1 && (s === 2 || s === 6 || s === 10 || s === 14)){
-        audio.note(audio.lead, audio.midiToHz(baseM + pick), t, 0.12, "sawtooth", 0.09);
-      }
-      if (vibe >= 2 && (s === 1 || s === 9)){
-        audio.note(audio.lead, audio.midiToHz(baseM + pick + 12), t, 0.09, "square", 0.05);
-      }
-
-      // pad (gentle)
-      if (s === 0){
-        const m = 57 + (vibe === 2 ? 2 : 0);
-        audio.note(audio.pad, audio.midiToHz(m), t, 0.45, "sine", 0.05);
-        audio.note(audio.pad, audio.midiToHz(m+7), t, 0.45, "sine", 0.04);
-      }
-
-      // advance time by current bpm
-      const spb = 60 / state.bpm;
-      audio.nextStepTime += spb / 4; // 16th note grid
-      audio.step++;
-    }
-  }
-
-  /* =========================
-     GAME STATE
-  ========================= */
   const state = {
-    mode: "menu", // splash | menu | game
     running: false,
-
-    // scoring
+    startedAt: 0,
+    lastBeatAt: 0,
+    bpm: 80,
+    lv: 1,
     score: 0,
     combo: 0,
     streak: 0,
-    coins: save.coins,
+    coins: save.coins ?? 0,
     lives: 3,
-
-    // tempo/progression
-    bpm: 80,
-    level: 1,
-    energy: 0, // 0..100
-    vibeStage: 0, // 0 verse, 1 pre, 2 chorus
-    timeAlive: 0,
-
-    // timing
-    beatStart: 0,
-    lastBeatTime: 0,
+    energy: 0,        // 0..100
+    vibe: "Verse",     // Verse / Build / Chorus
+    hitWindowMs: save.hitWindowMs ?? 210, // adjustable (bigger = easier)
+    musicOn: save.musicOn ?? true,
+    hapticsOn: save.hapticsOn ?? true,
+    skin: save.skin ?? "Aurora",
+    // ring movement
+    x: 0.5, y: 0.62,
+    tx: 0.5, ty: 0.62,
+    ringPx: { x: 0, y: 0, r: 95 },
+    // beat scheduling
     beatIndex: 0,
-
-    // target motion
-    bounds: { w: 0, h: 0 },
-    target: { x: 0, y: 0, r: 85 },
-    targetTo: { x: 0, y: 0 },
-
-    // stats
-    stats: { hits: 0, miss: 0, perfect: 0, great: 0, good: 0 },
-
-    // animations
-    lastFrame: performance.now(),
-    reduceMotion: !!save.settings.reduceMotion
+    // fly-by
+    nextFlyAt: 0,
   };
 
-  function resetRun(){
+  // Skins (all tryable)
+  const SKINS = [
+    { name: "Aurora",   core: ["#2cf0df", "#ff4f9a"], rim: "rgba(255,255,255,0.30)" },
+    { name: "Mint",     core: ["#2cff8b", "#2cf0df"], rim: "rgba(255,255,255,0.28)" },
+    { name: "Candy",    core: ["#ff4f9a", "#ffd86a"], rim: "rgba(255,255,255,0.30)" },
+    { name: "Sky",      core: ["#6aa8ff", "#2cf0df"], rim: "rgba(255,255,255,0.26)" },
+    { name: "Cherry",   core: ["#ff2f6d", "#ff9ad1"], rim: "rgba(255,255,255,0.30)" },
+    { name: "Neon",     core: ["#b6ff5c", "#2cf0df"], rim: "rgba(255,255,255,0.26)" },
+  ];
+
+  // Achievements
+  const ACH = [
+    { id: "first_hit",  name: "First Touch",   desc: "Hit your first beat." },
+    { id: "combo_10",   name: "Combo x10",     desc: "Reach a 10 combo." },
+    { id: "combo_25",   name: "Combo x25",     desc: "Reach a 25 combo." },
+    { id: "survivor",   name: "Still Standing",desc: "Finish a run with 1 life left." },
+    { id: "coins_50",   name: "Shiny",         desc: "Earn 50 coins total." },
+    { id: "chorus",     name: "Into the Chorus",desc:"Reach the Chorus vibe." },
+  ];
+  const unlocked = new Set(save.ach ?? []);
+
+  // ---------- WebAudio (simple but fun) ----------
+  let audio = null;
+
+  function ensureAudio() {
+    if (audio) return audio;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    const ac = new AudioCtx();
+
+    // master
+    const master = ac.createGain();
+    master.gain.value = 0.55;
+    master.connect(ac.destination);
+
+    // music bus
+    const music = ac.createGain();
+    music.gain.value = 0.85;
+    music.connect(master);
+
+    // kick bus
+    const kickBus = ac.createGain();
+    kickBus.gain.value = 0.9;
+    kickBus.connect(music);
+
+    // hats bus
+    const hatBus = ac.createGain();
+    hatBus.gain.value = 0.55;
+    hatBus.connect(music);
+
+    // lead bus
+    const leadBus = ac.createGain();
+    leadBus.gain.value = 0.55;
+    leadBus.connect(music);
+
+    audio = { ac, master, music, kickBus, hatBus, leadBus, started: false };
+    return audio;
+  }
+
+  function beepHit(type) {
+    const a = ensureAudio();
+    if (!a || !state.musicOn) return;
+    // tiny click / sparkle
+    const t = a.ac.currentTime;
+    const o = a.ac.createOscillator();
+    const g = a.ac.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(type === "perfect" ? 1200 : 900, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(type === "miss" ? 0.06 : 0.12, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    o.connect(g).connect(a.master);
+    o.start(t);
+    o.stop(t + 0.12);
+  }
+
+  function scheduleBeatSound(beatTime, step) {
+    const a = ensureAudio();
+    if (!a || !state.musicOn) return;
+
+    // kick every beat
+    kick(beatTime, step);
+
+    // hats every 1/2 beat in build/chorus (we fake by adding extra hats on even steps)
+    if (state.vibe !== "Verse" && step % 2 === 0) hat(beatTime + 0.5 * beatDur(), 0.35);
+
+    // lead in chorus
+    if (state.vibe === "Chorus") lead(beatTime, step);
+  }
+
+  function beatDur() {
+    return 60 / state.bpm;
+  }
+
+  function kick(t, step) {
+    const a = ensureAudio();
+    const ac = a.ac;
+
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+
+    o.type = "sine";
+    o.frequency.setValueAtTime(140, t);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.08);
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.9, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+
+    o.connect(g).connect(a.kickBus);
+    o.start(t);
+    o.stop(t + 0.14);
+
+    // little punch on downbeats
+    if (step % 4 === 0) {
+      const p = ac.createOscillator();
+      const pg = ac.createGain();
+      p.type = "triangle";
+      p.frequency.setValueAtTime(220, t);
+      pg.gain.setValueAtTime(0.0001, t);
+      pg.gain.exponentialRampToValueAtTime(0.22, t + 0.01);
+      pg.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+      p.connect(pg).connect(a.music);
+      p.start(t);
+      p.stop(t + 0.1);
+    }
+  }
+
+  function hat(t, amt = 0.45) {
+    const a = ensureAudio();
+    const ac = a.ac;
+
+    const bufferSize = 2 * ac.sampleRate * 0.03;
+    const buffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 4);
+
+    const src = ac.createBufferSource();
+    src.buffer = buffer;
+
+    const hp = ac.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 7000;
+
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(amt, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+
+    src.connect(hp).connect(g).connect(a.hatBus);
+    src.start(t);
+    src.stop(t + 0.05);
+  }
+
+  function lead(t, step) {
+    const a = ensureAudio();
+    const ac = a.ac;
+
+    const scale = [0, 3, 5, 7, 10]; // minor-ish
+    const base = 440 * Math.pow(2, -1); // 220
+    const note = scale[(step / 2) % scale.length | 0];
+    const freq = base * Math.pow(2, note / 12);
+
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(freq, t);
+
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+
+    o.connect(g).connect(a.leadBus);
+    o.start(t);
+    o.stop(t + 0.25);
+  }
+
+  // ---------- FX particles ----------
+  const particles = [];
+  function resizeFx() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    fx.width = Math.floor(window.innerWidth * dpr);
+    fx.height = Math.floor(window.innerHeight * dpr);
+    fx.style.width = "100%";
+    fx.style.height = "100%";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", () => {
+    resizeFx();
+    computeRingMetrics();
+  });
+
+  function spawnConfetti(x, y, power = 16) {
+    const colors = ["#2cff8b", "#2cf0df", "#ff4f9a", "#ffd86a", "#6aa8ff"];
+    for (let i = 0; i < power; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() * 2 - 1) * 3.8,
+        vy: (Math.random() * -1) * 4.6 - 1.5,
+        g: 0.12 + Math.random() * 0.10,
+        a: 1,
+        s: 2 + Math.random() * 3,
+        r: Math.random() * Math.PI,
+        vr: (Math.random() * 2 - 1) * 0.25,
+        c: colors[(Math.random() * colors.length) | 0],
+        t: Math.random() < 0.5 ? "star" : "dot",
+      });
+    }
+  }
+
+  function stepFx() {
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+    // gentle stars in background
+    if (Math.random() < 0.18) {
+      particles.push({
+        x: Math.random() * window.innerWidth,
+        y: -10,
+        vx: (Math.random() * 2 - 1) * 0.15,
+        vy: 0.5 + Math.random() * 1.2,
+        g: 0,
+        a: 0.7,
+        s: 1 + Math.random() * 2.2,
+        r: Math.random() * Math.PI,
+        vr: 0.01,
+        c: "rgba(255,255,255,0.85)",
+        t: "spark",
+      });
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.vy += p.g;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.r += p.vr;
+      p.a *= 0.985;
+
+      if (p.a < 0.05 || p.y > window.innerHeight + 40) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = p.a;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.r);
+
+      if (p.t === "star" || p.t === "spark") {
+        drawStar(0, 0, p.s * 0.55, p.s, 5, p.c);
+      } else {
+        ctx.fillStyle = p.c;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    requestAnimationFrame(stepFx);
+  }
+
+  function drawStar(x, y, r1, r2, n, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < n * 2; i++) {
+      const ang = (i * Math.PI) / n;
+      const r = i % 2 === 0 ? r2 : r1;
+      ctx.lineTo(x + Math.cos(ang) * r, y + Math.sin(ang) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // ---------- UI helpers ----------
+  function showScreen(el) {
+    [splash, menu, game].forEach(s => s.classList.remove("is-on"));
+    el.classList.add("is-on");
+
+    splash.setAttribute("aria-hidden", el !== splash);
+    menu.setAttribute("aria-hidden", el !== menu);
+    game.setAttribute("aria-hidden", el !== game);
+  }
+
+  function openModal(m) {
+    backdrop.classList.add("is-on");
+    backdrop.setAttribute("aria-hidden", "false");
+    m.classList.add("is-on");
+    m.setAttribute("aria-hidden", "false");
+  }
+  function closeModal() {
+    backdrop.classList.remove("is-on");
+    backdrop.setAttribute("aria-hidden", "true");
+    [modalSettings, modalShop, modalAch].forEach(m => {
+      m.classList.remove("is-on");
+      m.setAttribute("aria-hidden", "true");
+    });
+  }
+  backdrop.addEventListener("click", closeModal);
+  document.addEventListener("click", (e) => {
+    if (e.target && e.target.matches("[data-close]")) closeModal();
+  });
+
+  function haptic(ms = 18) {
+    if (!state.hapticsOn) return;
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
+
+  function setJudge(type, text) {
+    judge.className = "judge show";
+    if (type === "perfect") judge.classList.add("judge--perfect");
+    if (type === "great") judge.classList.add("judge--great");
+    if (type === "miss") judge.classList.add("judge--miss");
+    judge.textContent = text;
+
+    judge.setAttribute("aria-hidden", "false");
+    // restart animation
+    void judge.offsetWidth;
+    judge.classList.add("show");
+  }
+
+  function updateHearts() {
+    [h1, h2, h3].forEach((h, i) => {
+      const on = state.lives >= (3 - i);
+      h.classList.toggle("is-off", !on);
+    });
+  }
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // ---------- Achievements ----------
+  function unlock(id) {
+    if (unlocked.has(id)) return;
+    unlocked.add(id);
+    save.ach = Array.from(unlocked);
+    persistSave();
+    // small celebration
+    spawnConfetti(window.innerWidth * 0.5, window.innerHeight * 0.35, 26);
+  }
+
+  function renderAch() {
+    const root = $("#achList");
+    root.innerHTML = "";
+    ACH.forEach(a => {
+      const div = document.createElement("div");
+      div.className = "ach" + (unlocked.has(a.id) ? " is-done" : "");
+      div.innerHTML = `<b>${a.name}</b><div class="s">${a.desc}</div>`;
+      root.appendChild(div);
+    });
+  }
+
+  // ---------- Skins ----------
+  function renderSkins() {
+    skinGrid.innerHTML = "";
+    SKINS.forEach(s => {
+      const b = document.createElement("button");
+      b.className = "skin" + (state.skin === s.name ? " is-on" : "");
+      b.textContent = s.name;
+      b.addEventListener("click", () => {
+        state.skin = s.name;
+        applySkin();
+        renderSkins();
+        save.skin = state.skin;
+        persistSave();
+      });
+      skinGrid.appendChild(b);
+    });
+  }
+
+  function applySkin() {
+    const s = SKINS.find(x => x.name === state.skin) || SKINS[0];
+    const core = ring.querySelector(".ring__core");
+    core.style.borderColor = s.rim;
+
+    // recolor core by setting CSS background via inline style
+    core.style.background =
+      `radial-gradient(circle at 55% 35%, rgba(255,255,255,0.85), rgba(255,255,255,0.20) 28%, rgba(0,0,0,0) 55%),
+       radial-gradient(circle at 30% 30%, ${s.core[0]}, rgba(0,0,0,0) 55%),
+       radial-gradient(circle at 70% 75%, ${s.core[1]}, rgba(0,0,0,0) 55%),
+       rgba(255,255,255,0.10)`;
+  }
+
+  // ---------- Gameplay ----------
+  let raf = 0;
+
+  function resetRun() {
     state.running = false;
+    state.startedAt = performance.now();
+    state.lastBeatAt = performance.now();
+    state.bpm = 80;
+    state.lv = 1;
     state.score = 0;
     state.combo = 0;
     state.streak = 0;
     state.lives = 3;
-    state.bpm = 80;          // start slower
-    state.level = 1;
     state.energy = 0;
-    state.vibeStage = 0;
-    state.timeAlive = 0;
-
-    state.stats = { hits: 0, miss: 0, perfect: 0, great: 0, good: 0 };
-
-    updateHUD(true);
-    buildLives();
+    state.vibe = "Verse";
+    state.beatIndex = 0;
+    state.nextFlyAt = performance.now() + 4500;
+    setTarget(true);
+    updateUI();
+    updateHearts();
   }
 
-  /* =========================
-     HUD/UI
-  ========================= */
-  function buildLives(){
-    livesEl.innerHTML = "";
-    for(let i=0;i<3;i++){
-      const h = document.createElement("div");
-      h.className = "heart" + (i < state.lives ? "" : " heart--off");
-      livesEl.appendChild(h);
-    }
-  }
-
-  function updateLives(){
-    const hearts = [...livesEl.querySelectorAll(".heart")];
-    hearts.forEach((h, i) => {
-      if (i < state.lives) h.classList.remove("heart--off");
-      else h.classList.add("heart--off");
-    });
-  }
-
-  function updateHUD(full=false){
-    scoreEl.textContent = Math.floor(state.score);
-    comboEl.textContent = state.combo;
-    coinsEl.textContent = state.coins;
-    bpmEl.textContent = Math.round(state.bpm);
-    levelEl.textContent = state.level;
-
-    vibeEl.textContent = state.vibeStage === 0 ? "Verse" : (state.vibeStage === 1 ? "Build" : "Chorus");
-    energyFill.style.width = `${Math.max(0, Math.min(100, state.energy))}%`;
-    energyPctEl.textContent = `${Math.round(state.energy)}%`;
-    streakEl.textContent = state.streak;
-
-    if (full) updateLives();
-  }
-
-  function showJudgement(text, kind){
-    // kind: perfect|great|good|miss|unlocked
-    const cls = kind === "perfect" ? "pop pop--perfect"
-              : kind === "great" ? "pop pop--great"
-              : kind === "good" ? "pop pop--good"
-              : "pop pop--miss";
-
-    judgementEl.innerHTML = `<div class="${cls}">${text}</div>`;
-    // auto clear
-    setTimeout(() => {
-      if (judgementEl.innerHTML.includes(text)) judgementEl.innerHTML = "";
-    }, 520);
-  }
-
-  function openModal(modal){
-    modal.classList.remove("hidden");
-    modal.setAttribute("aria-hidden", "false");
-  }
-  function closeModal(modal){
-    modal.classList.add("hidden");
-    modal.setAttribute("aria-hidden", "true");
-  }
-
-  function showScreen(name){
-    // hide all
-    screenSplash.setAttribute("aria-hidden", "true");
-    screenMenu.setAttribute("aria-hidden", "true");
-    screenGame.setAttribute("aria-hidden", "true");
-
-    if (name === "splash") screenSplash.setAttribute("aria-hidden", "false");
-    if (name === "menu") screenMenu.setAttribute("aria-hidden", "false");
-    if (name === "game") screenGame.setAttribute("aria-hidden", "false");
-    state.mode = name;
-  }
-
-  /* =========================
-     PARTICLES (canvas background)
-  ========================= */
-  let particles = [];
-  function resizeFx(){
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    fxCanvas.width = Math.floor(window.innerWidth * dpr);
-    fxCanvas.height = Math.floor(window.innerHeight * dpr);
-    fxCanvas.style.width = "100%";
-    fxCanvas.style.height = "100%";
-    fx.setTransform(dpr,0,0,dpr,0,0);
-  }
-
-  function seedStars(){
-    particles = [];
-    const count = state.reduceMotion ? 60 : 140;
-    for(let i=0;i<count;i++){
-      particles.push({
-        x: Math.random()*window.innerWidth,
-        y: Math.random()*window.innerHeight,
-        vx: (Math.random()*2-1)*0.06,
-        vy: (Math.random()*2-1)*0.06,
-        r: Math.random()*1.6 + 0.6,
-        a: Math.random()*0.6 + 0.25,
-        hue: [165, 200, 325][Math.floor(Math.random()*3)]
-      });
-    }
-  }
-
-  function burstConfetti(x, y, n=18){
-    if (state.reduceMotion) return;
-    const now = performance.now();
-    for(let i=0;i<n;i++){
-      particles.push({
-        x, y,
-        vx: (Math.random()*2-1)*2.2,
-        vy: (Math.random()*2-1)*2.2 - 1.8,
-        r: Math.random()*2.2 + 1.2,
-        a: 0.95,
-        hue: [165, 200, 325, 40][Math.floor(Math.random()*4)],
-        life: 700 + Math.random()*450,
-        born: now,
-        confetti: true
-      });
-    }
-  }
-
-  function drawFx(dt){
-    fx.clearRect(0,0,window.innerWidth,window.innerHeight);
-
-    // soft glow overlays
-    fx.globalCompositeOperation = "source-over";
-    fx.fillStyle = "rgba(255,255,255,0.02)";
-    fx.fillRect(0,0,window.innerWidth,window.innerHeight);
-
-    const now = performance.now();
-
-    for(let i=particles.length-1;i>=0;i--){
-      const p = particles[i];
-
-      if (p.confetti){
-        const age = now - p.born;
-        const t = age / p.life;
-        if (t >= 1){
-          particles.splice(i,1);
-          continue;
-        }
-        p.vy += 0.012; // gravity
-        p.x += p.vx;
-        p.y += p.vy;
-        p.a = 0.95 * (1 - t);
-
-        fx.save();
-        fx.globalAlpha = p.a;
-        fx.fillStyle = `hsla(${p.hue}, 90%, 65%, 1)`;
-        fx.translate(p.x, p.y);
-        fx.rotate((age/120) % (Math.PI*2));
-        fx.fillRect(-p.r, -p.r, p.r*2.2, p.r*1.2);
-        fx.restore();
-        continue;
-      }
-
-      // star drift
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-
-      if (p.x < -20) p.x = window.innerWidth + 20;
-      if (p.x > window.innerWidth + 20) p.x = -20;
-      if (p.y < -20) p.y = window.innerHeight + 20;
-      if (p.y > window.innerHeight + 20) p.y = -20;
-
-      fx.globalAlpha = p.a;
-      fx.fillStyle = `hsla(${p.hue}, 85%, 75%, 1)`;
-      fx.beginPath();
-      fx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-      fx.fill();
-    }
-    fx.globalAlpha = 1;
-  }
-
-  /* =========================
-     DISTRACTORS (DOM)
-  ========================= */
-  let distractors = [];
-  function spawnDistractor(){
-    if (state.reduceMotion) return;
-    const el = document.createElement("div");
-    el.className = "distractor";
-    const y = 60 + Math.random()*(state.bounds.h - 120);
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    const x = dir < 0 ? state.bounds.w + 80 : -80;
-    const speed = 70 + Math.random()*140;
-
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-    distractorsEl.appendChild(el);
-
-    distractors.push({ el, x, y, dir, speed, born: performance.now() });
-  }
-
-  function updateDistractors(dt){
-    for(let i=distractors.length-1;i>=0;i--){
-      const d = distractors[i];
-      d.x += d.dir * d.speed * dt;
-      d.el.style.transform = `translate(${d.x}px, ${d.y}px) rotate(${(performance.now()/400)%360}deg)`;
-      if ((d.dir < 0 && d.x < -160) || (d.dir > 0 && d.x > state.bounds.w + 160)){
-        d.el.remove();
-        distractors.splice(i,1);
-      }
-    }
-    // limit nodes
-    if (distractors.length > 6){
-      const d = distractors.shift();
-      d.el.remove();
-    }
-  }
-
-  /* =========================
-     TARGET MOTION (smooth glide)
-  ========================= */
-  function measureBounds(){
-    const r = playfield.getBoundingClientRect();
-    state.bounds.w = r.width;
-    state.bounds.h = r.height;
-
-    // radius depends on screen
-    const base = Math.min(r.width, r.height);
-    state.target.r = Math.max(62, Math.min(92, base * 0.17));
-
-    // keep initial in view
-    if (!state.target.x && !state.target.y){
-      state.target.x = r.width * 0.55;
-      state.target.y = r.height * 0.55;
-      state.targetTo.x = state.target.x;
-      state.targetTo.y = state.target.y;
-    }
-  }
-
-  function pickNewTarget(){
-    const pad = state.target.r + 22;
-    const x = pad + Math.random()*(state.bounds.w - pad*2);
-    const y = pad + Math.random()*(state.bounds.h - pad*2);
-    state.targetTo.x = x;
-    state.targetTo.y = y;
-  }
-
-  function renderTarget(){
-    targetEl.style.transform = `translate(${state.target.x - state.target.r}px, ${state.target.y - state.target.r}px)`;
-    targetEl.style.width = `${state.target.r*2}px`;
-    targetEl.style.height = `${state.target.r*2}px`;
-    targetEl.querySelector(".target__core").style.inset = `${Math.max(26, state.target.r*0.42)}px`;
-  }
-
-  function updateTarget(dt){
-    // glide: exponential smoothing, never "teleport"
-    const speed = state.reduceMotion ? 5.5 : 7.5;
-    state.target.x += (state.targetTo.x - state.target.x) * (1 - Math.exp(-speed * dt));
-    state.target.y += (state.targetTo.y - state.target.y) * (1 - Math.exp(-speed * dt));
-
-    renderTarget();
-  }
-
-  /* =========================
-     TIMING / HIT WINDOW
-     (bigger window -> fewer false MISS)
-  ========================= */
-  function hitWindowMs(){
-    // easier: keep generous windows, only slightly tighter on higher levels
-    const perfect = Math.max(110, 140 - (state.level-1)*6); // ms
-    const great   = Math.max(200, 240 - (state.level-1)*8); // ms
-    const good    = Math.max(260, 300 - (state.level-1)*6); // ms
-    return { perfect, great, good };
-  }
-
-  function nearestBeatDeltaMs(nowMs){
-    const spb = 60000 / state.bpm;
-    const sinceStart = nowMs - state.beatStart;
-    const beatFloat = sinceStart / spb;
-    const nearest = Math.round(beatFloat);
-    const nearestTime = state.beatStart + nearest * spb;
-    return nowMs - nearestTime; // signed
-  }
-
-  function inCircle(px, py){
-    const dx = px - state.target.x;
-    const dy = py - state.target.y;
-    return (dx*dx + dy*dy) <= (state.target.r * state.target.r);
-  }
-
-  function haptic(kind){
-    if (!save.settings.haptics) return;
-    if (!navigator.vibrate) return;
-    if (kind === "perfect") navigator.vibrate([12]);
-    else if (kind === "great") navigator.vibrate([10]);
-    else if (kind === "good") navigator.vibrate([8]);
-    else navigator.vibrate([20, 30, 20]);
-  }
-
-  function addCoins(n){
-    state.coins += n;
-    save.coins = state.coins;
-    persist();
-  }
-
-  function onHit(kind){
-    state.stats.hits++;
-    state.combo++;
-    state.streak++;
-    save.bestCombo = Math.max(save.bestCombo, state.combo);
-
-    // score + energy + coins
-    const mult = 1 + Math.min(2.5, state.combo / 18);
-    const add = kind === "perfect" ? 120 : kind === "great" ? 80 : 45;
-    state.score += add * mult;
-
-    const eAdd = kind === "perfect" ? 6 : kind === "great" ? 4 : 2;
-    state.energy = Math.min(100, state.energy + eAdd);
-
-    if (kind === "perfect") addCoins(2);
-    else if (kind === "great") addCoins(1);
-
-    if (kind === "perfect") state.stats.perfect++;
-    else if (kind === "great") state.stats.great++;
-    else state.stats.good++;
-
-    showJudgement(kind.toUpperCase(), kind);
-
-    // burst effect
-    burstConfetti(state.target.x, state.target.y, kind === "perfect" ? 26 : 14);
-
-    // progression: bpm ramps with combo + time
-    if (state.combo % 3 === 0) state.bpm = Math.min(160, state.bpm + 1.5);
-    if (state.combo % 10 === 0) pickNewTarget();
-
-    // Vibe stages based on combo/energy
-    if (state.combo >= 18 || state.energy >= 45) state.vibeStage = 1;
-    if (state.combo >= 35 || state.energy >= 75) state.vibeStage = 2;
-
-    // Level
-    state.level = 1 + Math.floor(state.score / 2000);
-
-    checkAchievements();
-    updateHUD();
-    haptic(kind);
-  }
-
-  function onMiss(reason="MISS"){
-    state.stats.miss++;
-    state.combo = 0;
-    state.streak = 0;
-
-    // lose heart, but do not reset whole run/music
-    state.lives = Math.max(0, state.lives - 1);
-    updateLives();
-
-    showJudgement(reason, "miss");
-    haptic("miss");
-
-    // drop energy
-    state.energy = Math.max(0, state.energy - 10);
-
-    // make it a bit easier after miss
-    state.bpm = Math.max(78, state.bpm - 2.5);
-
-    if (state.lives <= 0){
-      endRun();
-      return;
-    }
-
-    updateHUD();
-  }
-
-  function judgeTap(dtMs){
-    const { perfect, great, good } = hitWindowMs();
-    const a = Math.abs(dtMs);
-
-    if (a <= perfect) return "perfect";
-    if (a <= great) return "great";
-    if (a <= good) return "good";
-    return "miss";
-  }
-
-  /* =========================
-     RUN LOOP
-  ========================= */
-  function startRun(){
+  function startRun() {
     resetRun();
     state.running = true;
 
-    measureBounds();
-    applySkin(save.settings.skin);
-    buildSkinGrid();
+    // iOS needs audio resume on user gesture
+    const a = ensureAudio();
+    if (a && a.ac.state === "suspended") a.ac.resume().catch(()=>{});
 
-    state.beatStart = performance.now();
-    state.lastBeatTime = state.beatStart;
-    state.beatIndex = 0;
+    // schedule initial beat time a bit in the future so player feels ready
+    state.lastBeatAt = performance.now() + 650;
+    state.startedAt = performance.now();
 
-    // target initial + first destination
-    pickNewTarget();
-    renderTarget();
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(loop);
+  }
 
-    // audio
-    audioStart();
+  function endRun(reason = "gameover") {
+    state.running = false;
+    cancelAnimationFrame(raf);
 
-    // spawn distractors slowly at first
-    distractorsEl.innerHTML = "";
-    distractors = [];
+    if (state.lives === 1) unlock("survivor");
 
-    updateHUD(true);
+    // go back to menu
+    updateMenuHudFromState();
+    showScreen(menu);
+  }
 
-    // show tutorial once
-    if (!save.seenTutorial){
-      tutorial.classList.remove("hidden");
-      tutorial.setAttribute("aria-hidden","false");
+  function setTarget(force = false) {
+    // set new target position (normalized)
+    // Keep inside safe margins so ring never clips.
+    const mx = 0.16, my = 0.18;
+    const nx = mx + Math.random() * (1 - mx * 2);
+    const ny = my + Math.random() * (1 - my * 2);
+
+    state.tx = nx;
+    state.ty = ny;
+
+    if (force) {
+      state.x = nx;
+      state.y = ny;
     }
   }
 
-  function endRun(){
-    state.running = false;
-
-    save.bestScore = Math.max(save.bestScore, Math.floor(state.score));
-    save.bestCombo = Math.max(save.bestCombo, state.combo);
-    persist();
-
-    audioStop();
-    renderAchievements();
-
-    // go menu
-    showScreen("menu");
+  function computeRingMetrics() {
+    const rect = field.getBoundingClientRect();
+    const ringRect = ring.getBoundingClientRect();
+    // radius from current CSS (half width)
+    const r = ringRect.width / 2;
+    state.ringPx.r = r;
+    // center set by our positioning function each frame
+    state.ringPx.x = rect.left + rect.width * state.x;
+    state.ringPx.y = rect.top + rect.height * state.y;
   }
 
-  function frame(now){
-    const dt = Math.min(0.04, (now - state.lastFrame) / 1000);
-    state.lastFrame = now;
+  function updateUI() {
+    elScore.textContent = String(state.score);
+    elCombo.textContent = String(state.combo);
+    elCoins.textContent = String(state.coins);
+    elBpm.textContent = String(Math.round(state.bpm));
+    elLv.textContent = String(state.lv);
 
-    drawFx(dt * 60);
+    elVibe.textContent = state.vibe;
+    elStreak.textContent = String(state.streak);
+    elEnergyFill.style.width = `${state.energy}%`;
+    elEnergyPct.textContent = `${Math.round(state.energy)}%`;
+  }
 
-    if (state.mode === "game" && state.running){
-      state.timeAlive += dt;
+  function updateMenuHudFromState() {
+    elVibeMenu.textContent = state.vibe;
+    elStreakMenu.textContent = String(state.streak);
+    elEnergyFillMenu.style.width = `${state.energy}%`;
+    elEnergyPctMenu.textContent = `${Math.round(state.energy)}%`;
+  }
 
-      // choose new target slowly over time even without combo
-      if (!state.reduceMotion && Math.random() < dt * 0.08) spawnDistractor();
-      if (Math.random() < dt * 0.15 && state.combo < 6) {
-        // gentle movement early game
-        if ((now - state.beatStart) > 2500 && Math.random() < 0.03) pickNewTarget();
+  function vibeProgression() {
+    // energy and vibe based on combo and time
+    if (state.combo >= 18) state.vibe = "Chorus";
+    else if (state.combo >= 7) state.vibe = "Build";
+    else state.vibe = "Verse";
+
+    if (state.vibe === "Chorus") unlock("chorus");
+
+    // bpm ramps slower at first, faster later
+    const targetBpm = 80 + Math.min(50, state.combo * 1.8) + Math.min(20, (performance.now() - state.startedAt) / 8000);
+    state.bpm += (targetBpm - state.bpm) * 0.04;
+
+    // level from bpm
+    state.lv = 1 + Math.floor((state.bpm - 80) / 12);
+  }
+
+  function maybeFlyBy(now) {
+    if (now < state.nextFlyAt) return;
+    state.nextFlyAt = now + 3800 + Math.random() * 3200;
+
+    const emojis = ["✨","⚡️","🔥","💫","🍬","⭐️","🪽"];
+    const e = document.createElement("div");
+    e.className = "thing";
+    const y = 80 + Math.random() * (field.clientHeight - 200);
+    e.style.setProperty("--y", `${y}px`);
+    e.textContent = emojis[(Math.random() * emojis.length) | 0];
+    fly.appendChild(e);
+    setTimeout(() => e.remove(), 2600);
+  }
+
+  function loop(now) {
+    if (!state.running) return;
+
+    vibeProgression();
+    updateUI();
+    maybeFlyBy(now);
+
+    // Smooth movement (lerp) — no jerks
+    const moveSpeed = 0.035 + Math.min(0.03, state.bpm / 3000);
+    state.x += (state.tx - state.x) * moveSpeed;
+    state.y += (state.ty - state.y) * moveSpeed;
+
+    // Apply ring position (px)
+    const rect = field.getBoundingClientRect();
+    const px = rect.width * state.x;
+    const py = rect.height * state.y;
+
+    ring.style.left = `${px}px`;
+    ring.style.top = `${py}px`;
+    ring.style.transform = `translate(-50%, -50%)`;
+
+    // update ring metrics for hit test
+    state.ringPx.x = rect.left + px;
+    state.ringPx.y = rect.top + py;
+    state.ringPx.r = ring.getBoundingClientRect().width / 2;
+
+    // Beat scheduler (based on performance clock)
+    const beatMs = (60 / state.bpm) * 1000;
+
+    while (state.lastBeatAt <= now) {
+      // beat event
+      const beatTimeAudio = (() => {
+        const a = ensureAudio();
+        if (!a) return null;
+        // map perf.now to audio time
+        // we can't perfectly sync; but it's good enough for casual play
+        return a.ac.currentTime + 0.04;
+      })();
+
+      if (beatTimeAudio != null) scheduleBeatSound(beatTimeAudio, state.beatIndex);
+
+      // Move target each beat to keep it lively, but not too aggressive early
+      if (state.beatIndex % 1 === 0) setTarget(false);
+
+      // Spawn soft ambient confetti sometimes in chorus
+      if (state.vibe === "Chorus" && Math.random() < 0.25) {
+        spawnConfetti(rect.left + rect.width * (0.2 + Math.random()*0.6), rect.top + rect.height * (0.25 + Math.random()*0.5), 8);
       }
 
-      // energy decay (slow)
-      state.energy = Math.max(0, state.energy - dt * 1.15);
-
-      // bpm slowly increases with time (very light)
-      state.bpm = Math.min(160, state.bpm + dt * 0.25);
-
-      updateTarget(dt);
-      updateDistractors(dt);
-
-      // audio scheduling
-      audioTick();
-
-      updateHUD();
-      checkAchievements();
+      state.lastBeatAt += beatMs;
+      state.beatIndex++;
     }
 
-    requestAnimationFrame(frame);
+    raf = requestAnimationFrame(loop);
   }
 
-  /* =========================
-     INPUT
-  ========================= */
-  function getPointerPos(e){
-    const r = playfield.getBoundingClientRect();
-    const x = (e.clientX ?? (e.touches && e.touches[0].clientX)) - r.left;
-    const y = (e.clientY ?? (e.touches && e.touches[0].clientY)) - r.top;
-    return { x, y };
-  }
+  // Hit detection:
+  // 1) must tap inside circle area (distance <= r)
+  // 2) must be close to beat time (abs(delta) <= hitWindowMs)
+  function onTap(clientX, clientY) {
+    if (!state.running) return;
 
-  function onPointerDown(e){
-    if (state.mode !== "game" || !state.running) return;
-    e.preventDefault();
+    const dx = clientX - state.ringPx.x;
+    const dy = clientY - state.ringPx.y;
+    const dist = Math.hypot(dx, dy);
 
-    const p = getPointerPos(e);
+    const inside = dist <= state.ringPx.r; // WHOLE circle counts
 
-    // MUST tap in circle
-    if (!inCircle(p.x, p.y)){
-      onMiss("MISS");
+    // timing vs nearest beat:
+    const now = performance.now();
+    const beatMs = (60 / state.bpm) * 1000;
+    const nextBeat = state.lastBeatAt;           // scheduled future beat
+    const prevBeat = state.lastBeatAt - beatMs;  // previous beat
+    const deltaPrev = now - prevBeat;
+    const deltaNext = nextBeat - now;
+    const delta = Math.abs(deltaPrev) < Math.abs(deltaNext) ? deltaPrev : -deltaNext; // signed-ish
+    const absDelta = Math.abs(delta);
+
+    const windowMs = state.hitWindowMs;
+
+    if (!inside) {
+      miss(clientX, clientY, "MISS");
       return;
     }
 
-    const dtMs = nearestBeatDeltaMs(performance.now());
-    const res = judgeTap(dtMs);
-
-    if (res === "miss"){
-      onMiss("MISS");
-      return;
+    if (absDelta <= windowMs * 0.45) {
+      perfect(clientX, clientY);
+    } else if (absDelta <= windowMs) {
+      great(clientX, clientY);
+    } else {
+      miss(clientX, clientY, "MISS");
     }
-
-    onHit(res);
-
-    // little move as reward: target “slides” to new location more often when you hit
-    if (state.combo % 2 === 0) pickNewTarget();
   }
 
-  playfield.addEventListener("pointerdown", onPointerDown, { passive:false });
-  playfield.addEventListener("touchstart", onPointerDown, { passive:false });
+  function perfect(x, y) {
+    state.combo++;
+    state.streak++;
+    state.score += 35 + Math.min(65, state.combo);
+    state.energy = clamp(state.energy + 4.6, 0, 100);
+    state.coins += 1;
 
-  /* =========================
-     MENU + MODALS + SETTINGS
-  ========================= */
-  function wireModalClose(modal){
-    modal.addEventListener("click", (e) => {
-      const t = e.target;
-      if (t && t.getAttribute && t.getAttribute("data-close") === "1") closeModal(modal);
-    });
+    ring.classList.remove("is-miss");
+    ring.classList.add("is-hit");
+    setTimeout(() => ring.classList.remove("is-hit"), 120);
+
+    setJudge("perfect", "PERFECT!");
+    spawnConfetti(x, y, 22);
+    haptic(18);
+    beepHit("perfect");
+
+    unlock("first_hit");
+    if (state.combo >= 10) unlock("combo_10");
+    if (state.combo >= 25) unlock("combo_25");
+    if (state.coins >= 50) unlock("coins_50");
+
+    persistSaveCoins();
   }
 
-  wireModalClose(modalSettings);
-  wireModalClose(modalShop);
-  wireModalClose(modalAchievements);
+  function great(x, y) {
+    state.combo++;
+    state.streak++;
+    state.score += 18 + Math.min(40, state.combo);
+    state.energy = clamp(state.energy + 2.4, 0, 100);
+    if (state.combo % 3 === 0) state.coins += 1;
 
-  function syncSettingsUI(){
-    toggleMusic.checked = !!save.settings.music;
-    toggleHaptics.checked = !!save.settings.haptics;
-    toggleReduceMotion.checked = !!save.settings.reduceMotion;
+    ring.classList.remove("is-miss");
+    ring.classList.add("is-hit");
+    setTimeout(() => ring.classList.remove("is-hit"), 120);
+
+    setJudge("great", "GREAT!");
+    spawnConfetti(x, y, 12);
+    haptic(12);
+    beepHit("great");
+
+    if (state.combo >= 10) unlock("combo_10");
+    if (state.combo >= 25) unlock("combo_25");
+
+    persistSaveCoins();
   }
 
-  toggleMusic.addEventListener("change", () => {
-    save.settings.music = toggleMusic.checked;
-    persist();
-    if (!save.settings.music) audioStop();
-    else if (state.mode === "game" && state.running) audioStart();
-  });
+  function miss(x, y, text) {
+    state.combo = 0;
+    state.streak = 0;
+    state.energy = clamp(state.energy - 8, 0, 100);
 
-  toggleHaptics.addEventListener("change", () => {
-    save.settings.haptics = toggleHaptics.checked;
-    persist();
-  });
+    // lives system (no full reset!)
+    state.lives -= 1;
+    updateHearts();
 
-  toggleReduceMotion.addEventListener("change", () => {
-    save.settings.reduceMotion = toggleReduceMotion.checked;
-    state.reduceMotion = save.settings.reduceMotion;
-    persist();
-    seedStars();
-  });
+    ring.classList.remove("is-hit");
+    ring.classList.add("is-miss");
+    setTimeout(() => ring.classList.remove("is-miss"), 140);
 
-  btnSettings.addEventListener("click", () => {
-    syncSettingsUI();
-    buildSkinGrid();
-    openModal(modalSettings);
-  });
+    setJudge("miss", text);
+    spawnConfetti(x, y, 6);
+    haptic(30);
+    beepHit("miss");
 
-  btnSettingsMenu.addEventListener("click", () => {
-    syncSettingsUI();
-    buildSkinGrid();
-    openModal(modalSettings);
-  });
+    if (state.lives <= 0) {
+      endRun("dead");
+    }
+  }
 
-  btnShopMenu.addEventListener("click", () => openModal(modalShop));
-  btnAchMenu.addEventListener("click", () => {
-    renderAchievements();
-    openModal(modalAchievements);
-  });
+  // ---------- Input ----------
+  function attachInput() {
+    // pointerdown gives best iOS behavior
+    field.addEventListener("pointerdown", (e) => {
+      // prevent page gestures
+      e.preventDefault();
+      onTap(e.clientX, e.clientY);
+    }, { passive: false });
 
-  btnBackToMenu.addEventListener("click", () => {
-    closeModal(modalSettings);
-    showScreen("menu");
-    state.running = false;
-    audioStop();
-  });
+    // also allow touchstart fallback
+    field.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      const t = e.changedTouches[0];
+      onTap(t.clientX, t.clientY);
+    }, { passive: false });
+  }
 
-  btnPlay.addEventListener("click", () => {
-    showScreen("game");
-    startRun();
-  });
+  // ---------- Save ----------
+  function loadSave() {
+    try {
+      return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {};
+    } catch {
+      return {};
+    }
+  }
+  function persistSave() {
+    const payload = {
+      coins: state.coins,
+      ach: Array.from(unlocked),
+      hitWindowMs: state.hitWindowMs,
+      musicOn: state.musicOn,
+      hapticsOn: state.hapticsOn,
+      skin: state.skin,
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(payload));
+  }
+  function persistSaveCoins() {
+    save.coins = state.coins;
+    persistSave();
+  }
 
-  $("#btnSettingsMenu").addEventListener("pointerdown", (e)=>e.stopPropagation());
-  $("#btnPlay").addEventListener("pointerdown", (e)=>e.stopPropagation());
-
-  btnTutorialOk.addEventListener("click", () => {
-    tutorial.classList.add("hidden");
-    tutorial.setAttribute("aria-hidden","true");
-    save.seenTutorial = true;
-    persist();
-  });
-
-  // Settings/Shop/Ach from menu (ensure clickable)
-  $("#btnSettingsMenu").addEventListener("click", () => {});
-  $("#btnShopMenu").addEventListener("click", () => {});
-  $("#btnAchMenu").addEventListener("click", () => {});
-
-  /* =========================
-     STARTUP
-  ========================= */
-  function init(){
-    // screens
-    showScreen("splash");
-
-    // apply coins on HUD once you start
-    state.coins = save.coins;
-
-    // build lives once
-    buildLives();
-
-    // skins + settings
-    applySkin(save.settings.skin);
-    syncSettingsUI();
-    buildSkinGrid();
-
-    // achievements list ready
-    renderAchievements();
-
-    // FX
+  // ---------- Wire UI ----------
+  function init() {
     resizeFx();
-    seedStars();
+    stepFx();
 
-    // resize handlers
-    window.addEventListener("resize", () => {
-      resizeFx();
-      seedStars();
-      measureBounds();
-      renderTarget();
+    // initial settings
+    optMusic.checked = state.musicOn;
+    optHaptics.checked = state.hapticsOn;
+    optWindow.value = String(state.hitWindowMs);
+    renderSkins();
+    applySkin();
+    renderAch();
+    updateHearts();
+
+    // Events
+    btnPlay.addEventListener("click", () => {
+      showScreen(game);
+      startRun();
     });
 
-    // splash duration then menu
+    btnSettings.addEventListener("click", () => {
+      openModal(modalSettings);
+    });
+
+    btnShop.addEventListener("click", () => {
+      openModal(modalShop);
+    });
+
+    btnAch.addEventListener("click", () => {
+      renderAch();
+      openModal(modalAch);
+    });
+
+    gear.addEventListener("click", () => {
+      openModal(modalSettings);
+    });
+
+    btnBackMenu.addEventListener("click", () => {
+      closeModal();
+      endRun("menu");
+    });
+
+    optMusic.addEventListener("change", () => {
+      state.musicOn = optMusic.checked;
+      persistSave();
+      // resume audio context if turning on
+      if (state.musicOn) {
+        const a = ensureAudio();
+        if (a && a.ac.state === "suspended") a.ac.resume().catch(()=>{});
+      }
+    });
+
+    optHaptics.addEventListener("change", () => {
+      state.hapticsOn = optHaptics.checked;
+      persistSave();
+    });
+
+    optWindow.addEventListener("input", () => {
+      state.hitWindowMs = Number(optWindow.value);
+      persistSave();
+    });
+
+    attachInput();
+
+    // Show splash then menu (a bit longer)
+    showScreen(splash);
     setTimeout(() => {
-      showScreen("menu");
+      showScreen(menu);
+      updateMenuHudFromState();
     }, 1500);
-
-    // prevent double-tap zoom on iOS
-    let lastTouchEnd = 0;
-    document.addEventListener("touchend", (e) => {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 250) e.preventDefault();
-      lastTouchEnd = now;
-    }, { passive:false });
-
-    // measure playfield after first layout
-    setTimeout(() => {
-      measureBounds();
-      renderTarget();
-    }, 60);
-
-    requestAnimationFrame(frame);
   }
 
+  // Prevent iOS double-tap zoom on buttons / field
+  document.addEventListener("gesturestart", (e) => e.preventDefault());
+  document.addEventListener("dblclick", (e) => e.preventDefault());
+
+  // Start
   init();
+
 })();

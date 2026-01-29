@@ -1,205 +1,197 @@
-<!-- index.html -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-  <meta name="theme-color" content="#0b0f2a" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>TapBeat</title>
-
+  <meta name="theme-color" content="#0d1026" />
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
-  <!-- Background FX (confetti + stars) -->
+  <!-- Background FX canvas -->
   <canvas id="fx"></canvas>
 
   <!-- SPLASH -->
-  <section id="screen-splash" class="screen screen--center" aria-hidden="false">
+  <section id="splash" class="screen screen--center" aria-hidden="false">
     <div class="glass splash-card">
       <div class="splash-title">Nota Bene studio</div>
-      <div class="splash-sub">P R E S E N T S</div>
-      <div class="splash-spark"></div>
+      <div class="splash-sub">PRESENTS</div>
     </div>
   </section>
 
-  <!-- MAIN MENU -->
-  <section id="screen-menu" class="screen screen--center" aria-hidden="true">
-    <div class="menu-wrap">
-      <div class="logo">
-        <div class="logo__word">TapBeat</div>
-        <div class="logo__tag">hit the beat • build the vibe</div>
-      </div>
+  <!-- MENU -->
+  <section id="menu" class="screen screen--center" aria-hidden="true">
+    <div class="menu-wrap glass">
+      <h1 class="logo">TapBeat</h1>
+      <p class="tagline">hit the beat • build the vibe</p>
 
-      <div class="menu-buttons">
-        <button id="btnPlay" class="btn btn--primary">PLAY</button>
-        <button id="btnSettingsMenu" class="btn btn--ghost">SETTINGS</button>
-        <button id="btnShopMenu" class="btn btn--ghost">SHOP</button>
-        <button id="btnAchMenu" class="btn btn--ghost">ACHIEVEMENTS</button>
-      </div>
+      <button id="btnPlay" class="btn btn--primary">PLAY</button>
+      <button id="btnSettings" class="btn">SETTINGS</button>
+      <button id="btnShop" class="btn">SHOP</button>
+      <button id="btnAch" class="btn">ACHIEVEMENTS</button>
 
-      <div class="tiny-note">Tip: tap ONLY inside the circle. Misses cost hearts.</div>
+      <p class="tip">Tip: tap <b>ONLY</b> inside the circle. Misses cost hearts.</p>
+    </div>
+
+    <div class="bottom-hud">
+      <div class="hud-pill">
+        <div class="hud-k">VIBE</div>
+        <div id="hudVibeMenu" class="hud-v">Verse</div>
+      </div>
+      <div class="hud-pill hud-pill--wide">
+        <div class="hud-k">ENERGY</div>
+        <div class="bar"><div id="energyFillMenu" class="bar__fill"></div></div>
+        <div id="energyPctMenu" class="hud-v">0%</div>
+      </div>
+      <div class="hud-pill">
+        <div class="hud-k">STREAK</div>
+        <div id="streakMenu" class="hud-v">0</div>
+      </div>
     </div>
   </section>
 
   <!-- GAME -->
-  <section id="screen-game" class="screen" aria-hidden="true">
-    <!-- TOP HUD -->
-    <header class="hud-top" id="hudTop">
-      <div class="hud-pill">
-        <div class="hud-label">SCORE</div>
-        <div class="hud-value" id="score">0</div>
+  <section id="game" class="screen" aria-hidden="true">
+    <header class="topbar">
+      <div class="stat">
+        <div class="k">SCORE</div>
+        <div id="score" class="v">0</div>
       </div>
-      <div class="hud-pill">
-        <div class="hud-label">COMBO</div>
-        <div class="hud-value" id="combo">0</div>
+      <div class="stat">
+        <div class="k">COMBO</div>
+        <div id="combo" class="v">0</div>
       </div>
-      <div class="hud-pill">
-        <div class="hud-label">COINS</div>
-        <div class="hud-value" id="coins">0</div>
+      <div class="stat">
+        <div class="k">COINS</div>
+        <div id="coins" class="v">0</div>
       </div>
-      <div class="hud-pill">
-        <div class="hud-label">BPM</div>
-        <div class="hud-value" id="bpm">80</div>
+      <div class="stat">
+        <div class="k">BPM</div>
+        <div id="bpm" class="v">80</div>
       </div>
-      <div class="hud-pill">
-        <div class="hud-label">LV</div>
-        <div class="hud-value" id="level">1</div>
+      <div class="stat">
+        <div class="k">LV</div>
+        <div id="lv" class="v">1</div>
       </div>
 
-      <div class="hud-right">
-        <div id="lives" class="lives" aria-label="Lives"></div>
-        <button id="btnSettings" class="gear" aria-label="Settings">
-          <span class="gear__icon">⚙︎</span>
-        </button>
+      <button id="gear" class="gear" aria-label="Settings">
+        ⚙︎
+      </button>
+
+      <div class="hearts" aria-label="Lives">
+        <span class="heart" id="h1">♥</span>
+        <span class="heart" id="h2">♥</span>
+        <span class="heart" id="h3">♥</span>
       </div>
     </header>
 
-    <!-- PLAYFIELD (full screen) -->
-    <main id="playfield" class="playfield" role="application" aria-label="TapBeat playfield">
-      <!-- moving distractors -->
-      <div id="distractors" class="distractors" aria-hidden="true"></div>
-
-      <!-- target -->
-      <div id="target" class="target" aria-label="Target">
-        <div class="target__halo"></div>
-        <div class="target__ring"></div>
-        <div class="target__core"></div>
-        <div class="target__shine"></div>
-      </div>
-
-      <!-- judgement -->
-      <div id="judgement" class="judgement" aria-live="polite" aria-atomic="true"></div>
-
-      <!-- tutorial -->
-      <div id="tutorial" class="tutorial hidden" aria-hidden="true">
-        <div class="glass tutorial-card">
-          <h2 class="tut-title">How to play</h2>
-          <ol class="tut-list">
-            <li>Tap <b>inside</b> the circle on the beat.</li>
-            <li>Perfect = more score + more energy.</li>
-            <li>You have <b>3 hearts</b>. Misses remove hearts.</li>
-            <li>Keep combo to unlock achievements + skins.</li>
-          </ol>
-          <button id="btnTutorialOk" class="btn btn--primary">LET’S GO</button>
+    <main class="play-wrap">
+      <div id="field" class="field" role="application" aria-label="Tap field">
+        <div id="ring" class="ring">
+          <div class="ring__inner"></div>
+          <div class="ring__core"></div>
         </div>
+
+        <!-- Anime feedback -->
+        <div id="judge" class="judge" aria-hidden="true"></div>
+
+        <!-- fly-by distraction container -->
+        <div id="fly" class="fly" aria-hidden="true"></div>
       </div>
     </main>
 
-    <!-- BOTTOM HUD -->
-    <footer class="hud-bottom">
-      <div class="hud-mini vibe">
-        <div class="hud-mini__label">Vibe</div>
-        <div class="hud-mini__value" id="vibe">Verse</div>
+    <footer class="bottom-hud bottom-hud--game">
+      <div class="hud-pill">
+        <div class="hud-k">VIBE</div>
+        <div id="hudVibe" class="hud-v">Verse</div>
       </div>
 
-      <div class="hud-energy">
-        <div class="hud-mini__label">Energy</div>
-        <div class="bar">
-          <div id="energyFill" class="bar__fill"></div>
-        </div>
-        <div class="hud-mini__value" id="energyPct">0%</div>
+      <div class="hud-pill hud-pill--wide">
+        <div class="hud-k">ENERGY</div>
+        <div class="bar"><div id="energyFill" class="bar__fill"></div></div>
+        <div id="energyPct" class="hud-v">0%</div>
       </div>
 
-      <div class="hud-mini streak">
-        <div class="hud-mini__label">Streak</div>
-        <div class="hud-mini__value" id="streak">0</div>
+      <div class="hud-pill">
+        <div class="hud-k">STREAK</div>
+        <div id="streak" class="hud-v">0</div>
       </div>
     </footer>
   </section>
 
-  <!-- SETTINGS MODAL -->
-  <div id="modalSettings" class="modal hidden" aria-hidden="true">
-    <div class="modal__backdrop" data-close="1"></div>
-    <div class="modal__panel glass">
-      <div class="modal__title">Settings</div>
+  <!-- MODALS -->
+  <div id="modalBackdrop" class="backdrop" aria-hidden="true"></div>
+
+  <section id="modalSettings" class="modal" aria-hidden="true">
+    <div class="modal__card glass">
+      <div class="modal__head">
+        <h2>Settings</h2>
+        <button class="x" data-close>✕</button>
+      </div>
 
       <div class="row">
-        <div class="row__left">
-          <div class="row__label">Music</div>
-          <div class="row__sub">Synth beat + melody</div>
+        <div>
+          <div class="label">Music</div>
+          <div class="hint">WebAudio synth (no files needed)</div>
         </div>
-        <label class="switch">
-          <input id="toggleMusic" type="checkbox" />
-          <span class="switch__ui"></span>
+        <label class="toggle">
+          <input id="optMusic" type="checkbox" checked />
+          <span></span>
         </label>
       </div>
 
       <div class="row">
-        <div class="row__left">
-          <div class="row__label">Haptics</div>
-          <div class="row__sub">Vibration on hits</div>
+        <div>
+          <div class="label">Vibration</div>
+          <div class="hint">Tap feedback (iPhone supports it in many browsers)</div>
         </div>
-        <label class="switch">
-          <input id="toggleHaptics" type="checkbox" />
-          <span class="switch__ui"></span>
+        <label class="toggle">
+          <input id="optHaptics" type="checkbox" checked />
+          <span></span>
         </label>
       </div>
 
       <div class="row">
-        <div class="row__left">
-          <div class="row__label">Reduced motion</div>
-          <div class="row__sub">Less movement & particles</div>
+        <div>
+          <div class="label">Hit window</div>
+          <div class="hint">Bigger = easier</div>
         </div>
-        <label class="switch">
-          <input id="toggleReduceMotion" type="checkbox" />
-          <span class="switch__ui"></span>
-        </label>
+        <input id="optWindow" type="range" min="120" max="260" step="10" value="210" />
       </div>
 
-      <div class="divider"></div>
+      <div class="row">
+        <div class="label">Circle skin</div>
+        <div class="hint">Try them all</div>
+      </div>
 
-      <div class="modal__subtitle">Circle skin (try all)</div>
-      <div id="skinGrid" class="skin-grid"></div>
+      <div id="skinGrid" class="skins"></div>
 
-      <div class="divider"></div>
-
-      <button id="btnBackToMenu" class="btn btn--ghost btn--wide">Back to menu</button>
-      <button class="btn btn--primary btn--wide" data-close="1">Close</button>
+      <button id="btnBackMenu" class="btn btn--ghost">Back to Menu</button>
     </div>
-  </div>
+  </section>
 
-  <!-- SHOP MODAL (stub) -->
-  <div id="modalShop" class="modal hidden" aria-hidden="true">
-    <div class="modal__backdrop" data-close="1"></div>
-    <div class="modal__panel glass">
-      <div class="modal__title">Shop</div>
-      <div class="shop-stub">
-        <div class="shop-big">Coming soon ✨</div>
-        <div class="shop-sub">Skins, trails, cute mascots and more.</div>
+  <section id="modalShop" class="modal" aria-hidden="true">
+    <div class="modal__card glass">
+      <div class="modal__head">
+        <h2>Shop</h2>
+        <button class="x" data-close>✕</button>
       </div>
-      <button class="btn btn--primary btn--wide" data-close="1">Close</button>
+      <p class="muted">
+        Placeholder for now. Skins are free in Settings so you can test everything.
+      </p>
     </div>
-  </div>
+  </section>
 
-  <!-- ACHIEVEMENTS MODAL -->
-  <div id="modalAchievements" class="modal hidden" aria-hidden="true">
-    <div class="modal__backdrop" data-close="1"></div>
-    <div class="modal__panel glass">
-      <div class="modal__title">Achievements</div>
+  <section id="modalAch" class="modal" aria-hidden="true">
+    <div class="modal__card glass">
+      <div class="modal__head">
+        <h2>Achievements</h2>
+        <button class="x" data-close>✕</button>
+      </div>
       <div id="achList" class="ach-list"></div>
-      <button class="btn btn--primary btn--wide" data-close="1">Close</button>
     </div>
-  </div>
+  </section>
 
   <script defer src="game.js"></script>
 </body>
