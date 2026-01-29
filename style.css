@@ -156,6 +156,7 @@ body{
 /* Game layout */
 #game{
   display:flex;
+  padding-bottom: env(safe-area-inset-bottom);
   flex-direction:column;
   gap:12px;
   height: 100dvh; /* важно для iOS Safari */
@@ -167,11 +168,14 @@ body{
   align-items:center;
   gap:10px;
   flex-wrap:nowrap;              /* НЕ переносить */
-  overflow:hidden;               /* если не влезло — не ломаем layout */
+  overflow-x: auto;               /* если не влезло — можно проскроллить */
+overflow-y: visible;               /* если не влезло — не ломаем layout */
   padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+.hudTop::-webkit-scrollbar{ display:none; }
+.hearts{ margin-left: auto; flex: 0 0 auto; } /* сердечки прижаты вправо */
 
 .pill{
   min-width: 92px;
@@ -529,4 +533,11 @@ body{
   .pill{ min-width: 84px; }
   .feedback{ font-size: 34px; -webkit-text-stroke: 5px rgba(0,0,0,0.45); }
   .target{ width: 170px; height: 170px; }
+}
+
+.hudBottom{
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
 }
