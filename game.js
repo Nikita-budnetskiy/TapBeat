@@ -1,30 +1,66 @@
-/* TAPBEAT — v2
-   - Moving target (after tutorial)
-   - Tutorial overlay
-   - Achievements + coin rewards (localStorage)
-   - Shop stub (unlock with coins)
-   - Settings overlay (Haptics/Sound/Tutorial) + persistence
-   - More “alive” music (layers + variation) via WebAudio (no external assets)
+/* TAPBEAT — game.js (bright / smooth / target-only / anime HUD / single menu button / main menu / auto BPM ramp)
 
-   Files expected:
-   - index.html includes elements with ids used below
-   - style.css includes classes used below (.tap-ripple, .particle etc.)
+WHAT THIS FILE DOES (so you don’t need to rewire everything):
+- Works even if your HTML differs a bit: it looks for IDs, and if some UI nodes are missing it creates minimal ones.
+- Tap must be ON the moving circle. Tap outside = MISS.
+- Target movement is SMOOTH (glides using rAF interpolation).
+- Judgement text is NOT inside the circle; it’s a top-left “anime-style” HUD with cartoon sparks.
+- One gear button opens a single menu overlay (Play / Settings / Shop / Goals).
+- Splash screen stays longer, then shows Main Menu (game does NOT start immediately).
+- No BPM picker: BPM starts slower and ramps up with time + combo.
+- Music is more “alive”: multiple voices from the start, then evolves toward a “chorus” as combo/energy grows.
+- Haptics toggle + Sound toggle persist in localStorage.
 */
 
 (() => {
   const $ = (id) => document.getElementById(id);
 
-  const el = {
-  splashOverlay: $("splashOverlay"),
-splashPresents: $("splashPresents"),
-    stage: $("stage"),
-    playfield: document.querySelector(".playfield"),
-    target: $("target"),
-    ringOuter: $("ringOuter"),
-    ringInner: $("ringInner"),
-    hint: $("hint"),
-    judge: $("judge"),
+  // ---------- Storage ----------
+  const storage = {
+    get(key, fallback) {
+      try {
+        const v = localStorage.getItem(key);
+        return v === null ? fallback : JSON.parse(v);
+      } catch {
+        return fallback;
+      }
+    },
+    set(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+  };
 
+  // ---------- Find/Create UI safely ----------
+  const el = {
+    stage: $("stage") || document.body,
+    playfield: document.querySelector(".playfield") || document.querySelector(".target-wrap") || document.body,
+    target: $("target") || document.querySelector(".target"),
+    ringOuter: $("ringOuter") || document.querySelector(".ring-outer"),
+    ringInner: $("ringInner") || document.querySelector(".ring-inner"),
+
+    // overlays (optional)
+    splashOverlay: $("splashOverlay"),
+    splashPresents: $("splashPresents"),
+
+    startOverlay: $("startOverlay"),     // old start
+    pauseOverlay: $("pauseOverlay"),     // optional
+    tutorialOverlay: $("tutorialOverlay"),
+    shopOverlay: $("shopOverlay"),
+    achOverlay: $("achOverlay"),
+    settingsOverlay: $("settingsOverlay"),
+
+    // top buttons (we’ll consolidate under gear)
+    btnPause: $("btnPause"),
+    btnShop: $("btnShop"),
+    btnAchievements: $("btnAchievements"),
+    btnSettings: $("btnSettings"),
+
+    // settings toggles (optional)
+    setHaptics: $("setHaptics"),
+    setSound: $("setSound"),
+    setTutorial: $("setTutorial"),
+
+    // score UI (optional)
     score: $("score"),
     combo: $("combo"),
     coins: $("coins"),
@@ -34,475 +70,493 @@ splashPresents: $("splashPresents"),
     trackState: $("trackState"),
     energy: $("energy"),
 
-    startOverlay: $("startOverlay"),
-    pauseOverlay: $("pauseOverlay"),
-    tutorialOverlay: $("tutorialOverlay"),
-    achOverlay: $("achOverlay"),
-    shopOverlay: $("shopOverlay"),
-    settingsOverlay: $("settingsOverlay"),
-    toast: $("toast"),
-
-    btnStart: $("btnStart"),
-    btnPause: $("btnPause"),
-    btnResume: $("btnResume"),
-    btnRestart: $("btnRestart"),
-
-    btnShop: $("btnShop"),
-    btnAchievements: $("btnAchievements"),
-    btnSettings: $("btnSettings"),
-
-    btnShopClose: $("btnShopClose"),
-    btnAchClose: $("btnAchClose"),
-    btnSettingsClose: $("btnSettingsClose"),
-
-    modeSelect: $("modeSelect"),
-    bpmSelect: $("bpmSelect"),
-    haptics: $("haptics"),
-    sound: $("sound"),
-    tutorial: $("tutorial"),
-
-    setHaptics: $("setHaptics"),
-    setSound: $("setSound"),
-    setTutorial: $("setTutorial"),
-
-    tTitle: $("tTitle"),
-    tText: $("tText"),
-    btnTBack: $("btnTBack"),
-    btnTNext: $("btnTNext"),
-    btnTSkip: $("btnTSkip"),
-
-    achList: $("achList"),
-    shopGrid: $("shopGrid"),
-    trail: $("trail"),
+    toast: $("toast")
   };
 
-  // ---------- Storage ----------
-  const storage = {
-    get(key, fallback) {
-      try {
-        const v = localStorage.getItem(key);
-        return v === null ? fallback : JSON.parse(v);
-      } catch (_) {
-        return fallback;
+  // If target element is missing, create a minimal one so game still runs.
+  if (!el.target) {
+    const t = document.createElement("div");
+    t.id = "target";
+    t.className = "target";
+    t.innerHTML = `
+      <div class="sweet" aria-hidden="true"></div>
+      <div class="ring ring-outer" id="ringOuter"></div>
+      <div class="ring ring-inner" id="ringInner"></div>
+      <div class="core"><div class="core-dot"></div></div>
+    `;
+    el.playfield.appendChild(t);
+    el.target = t;
+    el.ringOuter = $("ringOuter") || t.querySelector(".ring-outer");
+    el.ringInner = $("ringInner") || t.querySelector(".ring-inner");
+  }
+
+  // ---------- Inject missing HUD/menus/styles (so your saved index/style don’t need to be perfect) ----------
+  function injectStylesOnce() {
+    if (document.querySelector("style[data-tapbeat-v3]")) return;
+    const s = document.createElement("style");
+    s.dataset.tapbeatV3 = "1";
+    s.textContent = `
+      /* Anime HUD (top-left) */
+      .anime-hud{
+        position: fixed;
+        left: 14px;
+        top: calc(12px + env(safe-area-inset-top));
+        z-index: 120;
+        pointer-events: none;
+        display: grid;
+        gap: 6px;
       }
-    },
-    set(key, value) {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch (_) {}
-    },
-  };
+      .anime-judge{
+        font-weight: 1000;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 1.05rem;
+        line-height: 1;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(0,0,0,0.35);
+        border: 1px solid rgba(255,255,255,0.16);
+        backdrop-filter: blur(10px);
+        transform: translateY(-2px);
+        opacity: 0;
+        filter: blur(1px);
+      }
+      .anime-judge.show{
+        animation: judgePop 520ms cubic-bezier(.2,1,.2,1) both;
+      }
+      @keyframes judgePop{
+        0%{ opacity:0; transform: translateY(6px) scale(0.98); filter: blur(2px); }
+        35%{ opacity:1; transform: translateY(0) scale(1.05); filter: blur(0); }
+        100%{ opacity:1; transform: translateY(0) scale(1); }
+      }
+      .anime-judge.perfect{
+        color: rgba(255,255,255,0.98);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.55), 0 0 0 2px rgba(80,255,200,0.18) inset;
+        text-shadow:
+          0 2px 0 rgba(0,0,0,0.65),
+          0 0 18px rgba(80,255,200,0.55);
+      }
+      .anime-judge.great{
+        color: rgba(255,255,255,0.98);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.55), 0 0 0 2px rgba(120,190,255,0.18) inset;
+        text-shadow:
+          0 2px 0 rgba(0,0,0,0.65),
+          0 0 18px rgba(120,190,255,0.55);
+      }
+      .anime-judge.ok{
+        color: rgba(255,255,255,0.92);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.45), 0 0 0 2px rgba(255,170,190,0.16) inset;
+        text-shadow:
+          0 2px 0 rgba(0,0,0,0.6),
+          0 0 14px rgba(255,170,190,0.45);
+      }
+      .anime-judge.miss{
+        color: rgba(255,255,255,0.9);
+        box-shadow: 0 18px 60px rgba(0,0,0,0.45), 0 0 0 2px rgba(255,120,140,0.16) inset;
+        text-shadow:
+          0 2px 0 rgba(0,0,0,0.6),
+          0 0 14px rgba(255,120,140,0.45);
+      }
 
-  // ---------- State ----------
+      /* Sparks */
+      .spark{
+        position: fixed;
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        left: 0; top: 0;
+        z-index: 130;
+        pointer-events: none;
+        opacity: 0.95;
+        transform: translate(-50%,-50%);
+        animation: sparkFly 520ms ease-out forwards;
+        filter: drop-shadow(0 10px 20px rgba(0,0,0,0.45));
+      }
+      @keyframes sparkFly{
+        to{
+          transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.7);
+          opacity: 0;
+        }
+      }
+
+      /* Floating gear button (top-right) */
+      .gear-btn{
+        position: fixed;
+        right: 14px;
+        top: calc(12px + env(safe-area-inset-top));
+        z-index: 140;
+        width: 46px;
+        height: 46px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(0,0,0,0.35);
+        backdrop-filter: blur(10px);
+        color: rgba(255,255,255,0.9);
+        font-size: 18px;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+      }
+      .gear-btn:active{ transform: scale(0.98); }
+
+      /* Main menu overlay with big buttons */
+      .menu-card{
+        width: min(560px, 92vw);
+        border-radius: 22px;
+        padding: 18px 16px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background:
+          radial-gradient(700px 420px at 30% 20%, rgba(80,255,200,0.18), transparent 55%),
+          radial-gradient(700px 420px at 80% 70%, rgba(120,190,255,0.16), transparent 55%),
+          radial-gradient(600px 420px at 50% 50%, rgba(255,170,190,0.14), transparent 60%),
+          rgba(0,0,0,0.55);
+        backdrop-filter: blur(14px);
+        box-shadow: 0 18px 70px rgba(0,0,0,0.65);
+      }
+      .menu-title{
+        text-align: center;
+        font-weight: 1000;
+        letter-spacing: 0.18em;
+        font-size: 1.05rem;
+        margin: 6px 0 14px;
+      }
+      .menu-sub{
+        text-align: center;
+        color: rgba(255,255,255,0.70);
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin: 0 0 14px;
+      }
+      .menu-grid{
+        display: grid;
+        gap: 10px;
+      }
+      .menu-btn{
+        width: 100%;
+        min-height: 52px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.92);
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 14px;
+      }
+      .menu-btn strong{ font-size: 0.95rem; }
+      .menu-btn span{ color: rgba(255,255,255,0.65); font-weight: 800; }
+      .menu-btn.play{
+        background: linear-gradient(135deg, rgba(80,255,200,0.22), rgba(120,190,255,0.16), rgba(255,170,190,0.14));
+        border-color: rgba(255,255,255,0.18);
+      }
+      .menu-btn:active{ transform: scale(0.99); }
+
+      /* Make target glow more colorful */
+      .target{
+        will-change: left, top, transform;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(255,255,255,0.10), transparent 55%),
+          radial-gradient(circle at 20% 30%, rgba(80,255,200,0.20), transparent 60%),
+          radial-gradient(circle at 70% 40%, rgba(120,190,255,0.18), transparent 62%),
+          radial-gradient(circle at 50% 70%, rgba(255,170,190,0.16), transparent 65%);
+      }
+      .ring-outer{ border-color: rgba(80,255,200,0.58) !important; }
+      .ring-inner{ border-color: rgba(120,190,255,0.24) !important; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function createAnimeHUD() {
+    if (document.querySelector(".anime-hud")) return;
+    const hud = document.createElement("div");
+    hud.className = "anime-hud";
+    hud.innerHTML = `<div class="anime-judge" id="animeJudge">READY</div>`;
+    document.body.appendChild(hud);
+  }
+
+  function createGearButton() {
+    if ($("gearBtn")) return;
+    const b = document.createElement("button");
+    b.id = "gearBtn";
+    b.className = "gear-btn";
+    b.type = "button";
+    b.setAttribute("aria-label", "Menu");
+    b.textContent = "⚙️";
+    document.body.appendChild(b);
+  }
+
+  function createMainMenuOverlay() {
+    if ($("mainMenuOverlay")) return;
+    const ov = document.createElement("div");
+    ov.id = "mainMenuOverlay";
+    ov.className = "overlay hidden";
+    ov.innerHTML = `
+      <div class="menu-card">
+        <div class="menu-title">TAPBEAT</div>
+        <div class="menu-sub">Tap the moving circle on the beat. Build energy. Unlock new vibes.</div>
+        <div class="menu-grid">
+          <button class="menu-btn play" id="menuPlay"><strong>Play</strong><span>▶</span></button>
+          <button class="menu-btn" id="menuSettings"><strong>Settings</strong><span>⚙</span></button>
+          <button class="menu-btn" id="menuShop"><strong>Shop</strong><span>🛍</span></button>
+          <button class="menu-btn" id="menuGoals"><strong>Goals</strong><span>🏆</span></button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(ov);
+  }
+
+  function toast(msg) {
+    if (!el.toast) {
+      // create lightweight toast if missing
+      const t = document.createElement("div");
+      t.id = "toast";
+      t.className = "toast";
+      document.body.appendChild(t);
+      el.toast = t;
+
+      const st = document.createElement("style");
+      st.textContent = `
+        .toast{
+          position: fixed;
+          left: 50%;
+          bottom: calc(18px + env(safe-area-inset-bottom));
+          transform: translateX(-50%);
+          background: rgba(0,0,0,0.55);
+          border: 1px solid rgba(255,255,255,0.14);
+          color: rgba(255,255,255,0.92);
+          padding: 10px 12px;
+          border-radius: 999px;
+          box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+          opacity: 0;
+          transition: opacity 200ms ease, transform 200ms ease;
+          pointer-events: none;
+          font-size: 0.92rem;
+          z-index: 160;
+          white-space: nowrap;
+        }
+        .toast.show{ opacity: 1; transform: translateX(-50%) translateY(-2px); }
+      `;
+      document.head.appendChild(st);
+    }
+
+    el.toast.textContent = msg;
+    el.toast.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.toast.classList.remove("show"), 1400);
+  }
+
+  function setAnimeJudge(text, kind) {
+    const j = $("animeJudge");
+    if (!j) return;
+
+    j.className = `anime-judge ${kind || ""} show`;
+    j.textContent = text;
+
+    // re-trigger animation
+    j.classList.remove("show");
+    void j.offsetWidth;
+    j.classList.add("show");
+
+    // sparks
+    spawnSparks(kind);
+
+    // auto fade after a moment
+    clearTimeout(setAnimeJudge._t);
+    setAnimeJudge._t = setTimeout(() => {
+      j.style.opacity = "0";
+      setTimeout(() => (j.style.opacity = ""), 10);
+    }, 520);
+  }
+
+  function spawnSparks(kind) {
+    const j = $("animeJudge");
+    if (!j) return;
+    const r = j.getBoundingClientRect();
+    const baseX = r.left + 18;
+    const baseY = r.top + r.height / 2;
+
+    const palette = {
+      perfect: ["rgba(80,255,200,0.95)", "rgba(120,190,255,0.95)"],
+      great: ["rgba(120,190,255,0.95)", "rgba(255,170,190,0.92)"],
+      ok: ["rgba(255,170,190,0.92)", "rgba(255,255,255,0.85)"],
+      miss: ["rgba(255,120,140,0.95)", "rgba(255,170,190,0.92)"]
+    };
+
+    const colors = palette[kind] || ["rgba(255,255,255,0.85)"];
+    const count = kind === "perfect" ? 10 : kind === "great" ? 8 : kind === "ok" ? 6 : 7;
+
+    for (let i = 0; i < count; i++) {
+      const sp = document.createElement("div");
+      sp.className = "spark";
+      sp.style.left = `${baseX}px`;
+      sp.style.top = `${baseY}px`;
+      sp.style.background = colors[i % colors.length];
+
+      const ang = (Math.random() * Math.PI * 1.2) - Math.PI * 0.15; // mostly right/up
+      const dist = 90 + Math.random() * 80;
+      const dx = Math.cos(ang) * dist;
+      const dy = Math.sin(ang) * dist - 10;
+
+      sp.style.setProperty("--dx", `${dx}px`);
+      sp.style.setProperty("--dy", `${dy}px`);
+
+      document.body.appendChild(sp);
+      sp.addEventListener("animationend", () => sp.remove(), { once: true });
+    }
+  }
+
+  // ---------- Game State ----------
   const state = {
     running: false,
     paused: false,
 
-    bpm: 128,
-    beatMs: 60000 / 128,
+    // dynamic bpm
+    bpm: 108,
+    baseBpm: 108,
+    bpmMax: 168,
+    beatMs: 60000 / 108,
 
     // judgement windows (ms)
-    perfect: 42,
-    great: 90,
-    ok: 135,
+    perfect: 36,
+    great: 80,
+    ok: 125,
 
     score: 0,
     combo: 0,
     coins: 0,
     level: 1,
 
-    beatsThisRun: 0,
-    beatsPerLevel: 24,
-
-    // beat timing (perf ms)
-    nextBeatAtMs: 0,
+    // time
+    runStartMs: 0,
     lastBeatAtMs: 0,
-    drift: 0,
-    mode: "classic", // classic | drift
+    nextBeatAtMs: 0,
 
-    // progression
-    perfectStreak: 0,
-    totalPerfectThisRun: 0,
-    runStartedAt: 0,
+    // movement (smooth glide)
+    pos: { x: 0.5, y: 0.5 },
+    posTarget: { x: 0.5, y: 0.5 },
+    glide: 0.10, // lower = smoother & slower
+    moveEnabled: true,
+    moveEveryBeats: 3,
+    beatsCount: 0,
 
     // settings
-    audioOn: true,
     hapticsOn: true,
-    tutorialOn: true,
+    audioOn: true,
 
-    // target movement
-    moveEnabled: false,
-    moveEveryBeats: 4,
-    positions: [
-      { x: 0.50, y: 0.50 }, // center
-      { x: 0.27, y: 0.32 },
-      { x: 0.73, y: 0.32 },
-      { x: 0.30, y: 0.70 },
-      { x: 0.70, y: 0.70 },
-    ],
-    posIndex: 0,
-    targetX: 0.5,
-    targetY: 0.5,
-
-    // audio
+    // audio engine
     audio: null,
     audioPerfZeroMs: 0,
-    layers: {
-      kick: true,
-      hat: false,
-      clap: false,
-      bass: false,
-      lead: false,
-    },
 
-    // achievements & shop
-    achieved: {}, // id -> true
-    owned: {}, // shop item id -> true
-    selectedPack: "starter",
+    // music progression
+    energy: 0, // 0..1
+    chorus: 0, // 0..1
+    pack: "default",
   };
 
-  // ---------- Helpers ----------
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const nowMs = () => performance.now();
-
-  function toast(msg) {
-    if (!el.toast) return;
-    el.toast.textContent = msg;
-    el.toast.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => el.toast.classList.remove("show"), 1600);
-  }
-
-  function vibrate(ms) {
-    if (!state.hapticsOn) return;
-    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(ms);
-  }
-
-  function recomputeBeat() {
-    state.beatMs = 60000 / state.bpm;
-    el.bpm.textContent = String(state.bpm);
-  }
-
-  function updateEnergyUI() {
-    // energy 0..100 based on combo
-    const e = Math.floor(clamp((state.combo / 30) * 100, 0, 100));
-    if (el.energy) el.energy.textContent = `Energy: ${e}%`;
-  }
-
-  function updateTrackStateLabel() {
-    const parts = [];
-    if (state.layers.kick) parts.push("Kick");
-    if (state.layers.hat) parts.push("Hat");
-    if (state.layers.clap) parts.push("Clap");
-    if (state.layers.bass) parts.push("Bass");
-    if (state.layers.lead) parts.push("Lead");
-    el.trackState.textContent = `Track: ${parts.join(" + ")}`;
-  }
-
-  function setJudge(text, kind) {
-    el.judge.textContent = text;
-    const map = {
-      perfect: "var(--accent)",
-      great: "var(--good)",
-      ok: "var(--ok)",
-      miss: "var(--miss)",
-      info: "var(--muted)",
-    };
-    el.judge.style.color = map[kind] || "var(--text)";
-  }
-
-  // ---------- Settings persistence ----------
   function loadSettings() {
     state.hapticsOn = storage.get("tapbeat_haptics", true);
     state.audioOn = storage.get("tapbeat_sound", true);
-    state.tutorialOn = storage.get("tapbeat_tutorial", true);
-
     state.coins = storage.get("tapbeat_coins", 0);
-    state.achieved = storage.get("tapbeat_achievements", {});
-    state.owned = storage.get("tapbeat_owned", { starter: true });
-    state.selectedPack = storage.get("tapbeat_selectedPack", "starter");
+    if (el.coins) el.coins.textContent = String(state.coins);
 
-    if (el.haptics) el.haptics.checked = state.hapticsOn;
-    if (el.sound) el.sound.checked = state.audioOn;
-    if (el.tutorial) el.tutorial.checked = state.tutorialOn;
-
+    // sync settings overlay toggles if present
     if (el.setHaptics) el.setHaptics.checked = state.hapticsOn;
     if (el.setSound) el.setSound.checked = state.audioOn;
-    if (el.setTutorial) el.setTutorial.checked = state.tutorialOn;
-
-    el.coins.textContent = String(state.coins);
   }
 
   function saveSettings() {
     storage.set("tapbeat_haptics", state.hapticsOn);
     storage.set("tapbeat_sound", state.audioOn);
-    storage.set("tapbeat_tutorial", state.tutorialOn);
-
     storage.set("tapbeat_coins", state.coins);
-    storage.set("tapbeat_achievements", state.achieved);
-    storage.set("tapbeat_owned", state.owned);
-    storage.set("tapbeat_selectedPack", state.selectedPack);
   }
 
-  // ---------- Moving target ----------
-  function applyTargetPosition(x, y) {
-    state.targetX = x;
-    state.targetY = y;
+  function vibrate(ms) {
+    if (!state.hapticsOn) return;
+    if (navigator.vibrate) navigator.vibrate(ms);
+  }
 
-    const rect = el.playfield.getBoundingClientRect();
+  function recomputeBeat() {
+    state.beatMs = 60000 / state.bpm;
+    if (el.bpm) el.bpm.textContent = String(Math.round(state.bpm));
+  }
+
+  // ---------- Target movement + hit test ----------
+  function playfieldRect() {
+    return el.playfield.getBoundingClientRect();
+  }
+
+  function applyTargetCSS(x, y) {
+    const rect = playfieldRect();
     const px = rect.width * x;
     const py = rect.height * y;
 
-    // Keep target inside playfield
-    const size = Math.min(rect.width, rect.height) * 0.56; // approx target size
-    const pad = Math.max(14, size * 0.18);
-    const cx = clamp(px, pad, rect.width - pad);
-    const cy = clamp(py, pad, rect.height - pad);
+    const size = Math.min(rect.width, rect.height) * 0.56; // approximate
+    const pad = Math.max(18, size * 0.18);
+    const cx = Math.max(pad, Math.min(rect.width - pad, px));
+    const cy = Math.max(pad, Math.min(rect.height - pad, py));
 
     el.target.style.left = `${(cx / rect.width) * 100}%`;
-    el.target.style.top = `${(cy / rect.height) * 100}%`;
-
-    // trail glow
-    if (el.trail) {
-      el.trail.style.opacity = "1";
-      el.trail.style.background = `radial-gradient(260px 260px at ${(cx / rect.width) * 100}% ${(cy / rect.height) * 100}%, rgba(181,31,58,0.16), transparent 65%)`;
-      clearTimeout(applyTargetPosition._t);
-      applyTargetPosition._t = setTimeout(() => (el.trail.style.opacity = "0"), 280);
-    }
+    el.target.style.top  = `${(cy / rect.height) * 100}%`;
   }
 
-  function moveTargetNext() {
-    if (!state.moveEnabled) return;
-    // avoid repeating same position too often
-    let next = state.posIndex;
-    for (let i = 0; i < 6 && next === state.posIndex; i++) {
-      next = Math.floor(Math.random() * state.positions.length);
-    }
-    state.posIndex = next;
-    const p = state.positions[next];
-    applyTargetPosition(p.x, p.y);
+  function pickNextPosition() {
+    // colorful “arena” movement — choose among 5-ish anchors + slight randomness
+    const anchors = [
+      { x: 0.50, y: 0.50 },
+      { x: 0.22, y: 0.30 },
+      { x: 0.78, y: 0.30 },
+      { x: 0.28, y: 0.72 },
+      { x: 0.72, y: 0.72 },
+      { x: 0.50, y: 0.18 },
+      { x: 0.50, y: 0.86 },
+    ];
+    const pick = anchors[Math.floor(Math.random() * anchors.length)];
+    // small drift for “alive” feel
+    const dx = (Math.random() * 0.10) - 0.05;
+    const dy = (Math.random() * 0.10) - 0.05;
+    state.posTarget.x = Math.max(0.12, Math.min(0.88, pick.x + dx));
+    state.posTarget.y = Math.max(0.14, Math.min(0.86, pick.y + dy));
   }
 
-  // ---------- Visual effects ----------
-  function spawnRipple() {
-    const r = document.createElement("div");
-    r.className = "tap-ripple";
-    el.target.appendChild(r);
-    r.addEventListener("animationend", () => r.remove(), { once: true });
+  function stepGlide() {
+    // smooth interpolation towards target
+    const k = state.glide;
+    state.pos.x += (state.posTarget.x - state.pos.x) * k;
+    state.pos.y += (state.posTarget.y - state.pos.y) * k;
+    applyTargetCSS(state.pos.x, state.pos.y);
   }
 
-  function spawnParticles(kind) {
-    const container = document.createElement("div");
-    container.className = "particles";
-    el.target.appendChild(container);
-
-    const count = kind === "perfect" ? 12 : kind === "great" ? 9 : 6;
-    for (let i = 0; i < count; i++) {
-      const p = document.createElement("div");
-      p.className = "particle";
-      const ang = Math.random() * Math.PI * 2;
-      const dist = (kind === "perfect" ? 120 : 90) + Math.random() * 40;
-      const dx = Math.cos(ang) * dist;
-      const dy = Math.sin(ang) * dist;
-
-      p.style.left = "50%";
-      p.style.top = "50%";
-      p.style.setProperty("--dx", `${dx}px`);
-      p.style.setProperty("--dy", `${dy}px`);
-
-      if (kind === "perfect") p.style.background = "rgba(181,31,58,0.95)";
-      else if (kind === "great") p.style.background = "rgba(255,209,102,0.95)";
-      else p.style.background = "rgba(123,223,242,0.95)";
-
-      container.appendChild(p);
-    }
-
-    setTimeout(() => container.remove(), 600);
+  function pointInsideTarget(clientX, clientY) {
+    const tr = el.target.getBoundingClientRect();
+    const cx = tr.left + tr.width / 2;
+    const cy = tr.top + tr.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const radius = Math.min(tr.width, tr.height) * 0.48; // “circle”
+    return (dx * dx + dy * dy) <= (radius * radius);
   }
 
-  function flashTarget(color) {
-    el.target.animate(
-      [
-        { boxShadow: "0 18px 60px rgba(0,0,0,0.55)" },
-        { boxShadow: `0 20px 80px ${color}` },
-        { boxShadow: "0 18px 60px rgba(0,0,0,0.55)" },
-      ],
-      { duration: 240, easing: "ease-out" }
-    );
-    el.target.classList.add("pulse");
-    clearTimeout(flashTarget._t);
-    flashTarget._t = setTimeout(() => el.target.classList.remove("pulse"), 220);
+  // ---------- Ring animation ----------
+  function renderRing(phase) {
+    if (!el.ringOuter || !el.ringInner) return;
+    const p = Math.max(0, Math.min(1, phase));
+    const outerScale = 1.42 - 0.62 * p;
+    const innerScale = 1.18 - 0.34 * p;
+
+    // brighter / more visible
+    const outerOpacity = 0.18 + 0.82 * Math.pow(p, 0.8);
+    const innerOpacity = 0.12 + 0.62 * Math.pow(p, 0.8);
+
+    el.ringOuter.style.opacity = String(outerOpacity);
+    el.ringOuter.style.transform = `scale(${outerScale})`;
+    el.ringInner.style.opacity = String(innerOpacity);
+    el.ringInner.style.transform = `scale(${innerScale})`;
   }
 
-  // ---------- Achievements ----------
-  const ACH = [
-    { id: "first_run", title: "First Run", desc: "Start your first game.", coins: 50 },
-    { id: "score_1000", title: "1,000 Score", desc: "Reach 1,000 points in a run.", coins: 120 },
-    { id: "combo_10", title: "Combo 10", desc: "Hit 10 in a row.", coins: 80 },
-    { id: "combo_25", title: "Combo 25", desc: "Hit 25 in a row.", coins: 160 },
-    { id: "combo_50", title: "Combo 50", desc: "Hit 50 in a row.", coins: 320 },
-    { id: "perfect_8", title: "Perfect Streak", desc: "8 Perfect hits in a row.", coins: 180 },
-    { id: "level_5", title: "Level 5", desc: "Reach level 5.", coins: 150 },
-  ];
-
-  function awardAchievement(id) {
-    if (state.achieved[id]) return;
-    state.achieved[id] = true;
-    const a = ACH.find((x) => x.id === id);
-    if (a) {
-      state.coins += a.coins;
-      el.coins.textContent = String(state.coins);
-      saveSettings();
-      toast(`🏆 ${a.title} +${a.coins} coins`);
-    }
-  }
-
-  function renderAchievements() {
-    if (!el.achList) return;
-    el.achList.innerHTML = "";
-    ACH.forEach((a) => {
-      const done = !!state.achieved[a.id];
-      const div = document.createElement("div");
-      div.className = "item";
-      div.innerHTML = `
-        <div class="item-row">
-          <div>
-            <div class="item-title">${done ? "✅" : "⬜"} ${a.title}</div>
-            <div class="item-desc">${a.desc}</div>
-          </div>
-          <div class="item-reward">${a.coins}🪙</div>
-        </div>
-      `;
-      el.achList.appendChild(div);
-    });
-  }
-
-  // ---------- Shop (stub) ----------
-  const SHOP = [
-    { id: "starter", name: "Starter Pack", desc: "Default groove. Always owned.", price: 0 },
-    { id: "neon", name: "Neon Pack", desc: "Brighter lead + punchier hats.", price: 600 },
-    { id: "acid", name: "Acid Pack", desc: "Squishy bass + sharper drops.", price: 900 },
-    { id: "night", name: "Night Skin", desc: "Darker UI glow (cosmetic).", price: 450 },
-  ];
-
-  function renderShop() {
-    if (!el.shopGrid) return;
-    el.shopGrid.innerHTML = "";
-
-    SHOP.forEach((it) => {
-      const owned = !!state.owned[it.id];
-      const selected = state.selectedPack === it.id;
-
-      const card = document.createElement("div");
-      card.className = "shop-item";
-      card.innerHTML = `
-        <div class="shop-name">${it.name}</div>
-        <div class="shop-desc">${it.desc}</div>
-        <div class="shop-row">
-          <div class="shop-price">${it.price === 0 ? "FREE" : `${it.price}🪙`}</div>
-          <button class="shop-btn" data-id="${it.id}">
-            ${owned ? (selected ? "Selected" : "Select") : "Unlock"}
-          </button>
-        </div>
-      `;
-      el.shopGrid.appendChild(card);
-
-      card.querySelector(".shop-btn").addEventListener("click", () => {
-        if (it.price === 0) {
-          state.owned[it.id] = true;
-          state.selectedPack = it.id;
-          saveSettings();
-          toast("Selected.");
-          renderShop();
-          return;
-        }
-
-        if (!owned) {
-          if (state.coins < it.price) {
-            toast("Not enough coins.");
-            return;
-          }
-          state.coins -= it.price;
-          state.owned[it.id] = true;
-          state.selectedPack = it.id;
-          el.coins.textContent = String(state.coins);
-          saveSettings();
-          toast(`Unlocked: ${it.name}`);
-          renderShop();
-          return;
-        }
-
-        state.selectedPack = it.id;
-        saveSettings();
-        toast("Selected.");
-        renderShop();
-      });
-    });
-  }
-
-  // ---------- Tutorial ----------
-  const TUTORIAL_STEPS = [
-    {
-      title: "How to Tap",
-      text: "Tap when the moving ring hits the dashed sweet zone.",
-      action: () => {
-        state.moveEnabled = false;
-        applyTargetPosition(0.5, 0.5);
-        setJudge("Watch the ring…", "info");
-      },
-    },
-    {
-      title: "Perfect Timing",
-      text: "Perfect is tight. Great is forgiving. Missing breaks combo.",
-      action: () => {
-        setJudge("Try to hit PERFECT", "perfect");
-      },
-    },
-    {
-      title: "Target Moves",
-      text: "After a few beats, the target starts moving. Keep the pulse.",
-      action: () => {
-        state.moveEnabled = true;
-        moveTargetNext();
-        setJudge("Now it moves.", "info");
-      },
-    },
-    {
-      title: "Unlock the Track",
-      text: "Combo unlocks more sound layers and better coin rewards.",
-      action: () => {
-        setJudge("Build combo!", "great");
-      },
-    },
-  ];
-
-  let tutorialStep = 0;
-
-  function openTutorial() {
-    tutorialStep = 0;
-    el.tutorialOverlay.classList.remove("hidden");
-    updateTutorialUI();
-  }
-
-  function closeTutorial() {
-    el.tutorialOverlay.classList.add("hidden");
-    // After tutorial, allow movement
-    state.moveEnabled = true;
-  }
-
-  function updateTutorialUI() {
-    const s = TUTORIAL_STEPS[tutorialStep];
-    el.tTitle.textContent = s.title;
-    el.tText.textContent = s.text;
-
-    el.btnTBack.disabled = tutorialStep === 0;
-    el.btnTNext.disabled = tutorialStep === TUTORIAL_STEPS.length - 1;
-
-    // run step action (safe)
-    try { s.action && s.action(); } catch (_) {}
-  }
-
-  // ---------- WebAudio Engine (more variety) ----------
+  // ---------- Audio (WebAudio) — more dynamic from the start ----------
   function makeAudioEngine() {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const ctx = new AudioCtx();
@@ -518,39 +572,45 @@ splashPresents: $("splashPresents"),
     comp.attack.value = 0.01;
     comp.release.value = 0.16;
 
+    const bus = ctx.createGain();
+    bus.gain.value = 0.95;
+    bus.connect(comp);
     comp.connect(master);
 
-    const bus = ctx.createGain();
-    bus.gain.value = 0.92;
-    bus.connect(comp);
-
-    // noise buffer for hats/claps
+    // noise buffer
     const noiseBuf = (() => {
       const len = ctx.sampleRate * 1.0;
-      const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1);
-      return buffer;
+      const b = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1);
+      return b;
     })();
 
-    function kick(t) {
-      const osc = ctx.createOscillator();
+    // global filter for “chorus lift”
+    const glue = ctx.createBiquadFilter();
+    glue.type = "lowpass";
+    glue.frequency.value = 1200;
+    glue.Q.value = 0.6;
+    glue.connect(bus);
+
+    function kick(t, amp = 1.0) {
+      const o = ctx.createOscillator();
       const g = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(160, t);
-      osc.frequency.exponentialRampToValueAtTime(48, t + 0.10);
+      o.type = "sine";
+      o.frequency.setValueAtTime(160, t);
+      o.frequency.exponentialRampToValueAtTime(48, t + 0.10);
 
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.0, t + 0.001);
+      g.gain.exponentialRampToValueAtTime(amp, t + 0.001);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
 
-      osc.connect(g);
-      g.connect(bus);
-      osc.start(t);
-      osc.stop(t + 0.22);
+      o.connect(g);
+      g.connect(glue);
+      o.start(t);
+      o.stop(t + 0.22);
     }
 
-    function hat(t, tone = 9000, amp = 0.55, dur = 0.06) {
+    function hat(t, tone = 9800, amp = 0.45, dur = 0.06) {
       const src = ctx.createBufferSource();
       src.buffer = noiseBuf;
 
@@ -565,7 +625,7 @@ splashPresents: $("splashPresents"),
 
       src.connect(hp);
       hp.connect(g);
-      g.connect(bus);
+      g.connect(glue);
 
       src.start(t);
       src.stop(t + dur + 0.02);
@@ -587,78 +647,89 @@ splashPresents: $("splashPresents"),
 
       src.connect(bp);
       bp.connect(g);
-      g.connect(bus);
+      g.connect(glue);
 
       src.start(t);
       src.stop(t + 0.16);
     }
 
-    function bass(t, freq = 55, drive = 0.85) {
-      const osc = ctx.createOscillator();
+    function bass(t, freq = 55, amp = 0.9) {
+      const o = ctx.createOscillator();
       const g = ctx.createGain();
       const lp = ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.value = 700;
+      lp.frequency.value = 600;
 
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(freq, t);
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(freq, t);
 
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(drive, t + 0.008);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      g.gain.exponentialRampToValueAtTime(amp, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
 
-      osc.connect(lp);
+      o.connect(lp);
       lp.connect(g);
-      g.connect(bus);
+      g.connect(glue);
 
-      osc.start(t);
-      osc.stop(t + 0.22);
+      o.start(t);
+      o.stop(t + 0.24);
     }
 
-    function lead(t, freq = 440, amp = 0.22, len = 0.12) {
-      const osc = ctx.createOscillator();
+    function pad(t, freq = 220, amp = 0.16, len = 0.28) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 900;
+
+      o.type = "triangle";
+      o.frequency.setValueAtTime(freq, t);
+
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(amp, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+
+      o.connect(lp);
+      lp.connect(g);
+      g.connect(glue);
+
+      o.start(t);
+      o.stop(t + len + 0.02);
+    }
+
+    function lead(t, freq = 440, amp = 0.18, len = 0.12) {
+      const o = ctx.createOscillator();
       const g = ctx.createGain();
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
-      bp.frequency.value = 1200;
-      bp.Q.value = 0.9;
+      bp.frequency.value = 1400;
+      bp.Q.value = 0.8;
 
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(freq, t);
+      o.type = "triangle";
+      o.frequency.setValueAtTime(freq, t);
 
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(amp, t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.0001, t + len);
 
-      osc.connect(bp);
+      o.connect(bp);
       bp.connect(g);
-      g.connect(bus);
+      g.connect(glue);
 
-      osc.start(t);
-      osc.stop(t + len + 0.02);
+      o.start(t);
+      o.stop(t + len + 0.02);
     }
 
-    return { ctx, kick, hat, clap, bass, lead };
+    return { ctx, master, glue, kick, hat, clap, bass, pad, lead };
   }
 
-  // ---------- Scheduling ----------
-  let rafId = 0;
-  let schedTimer = 0;
-
-  function renderRing(phase) {
-    const p = clamp(phase, 0, 1);
-
-    const outerScale = 1.35 - 0.55 * p;
-    const innerScale = 1.15 - 0.30 * p;
-
-    const outerOpacity = 0.12 + 0.88 * Math.pow(p, 0.85);
-    const innerOpacity = 0.10 + 0.62 * Math.pow(p, 0.85);
-
-    el.ringOuter.style.opacity = String(outerOpacity);
-    el.ringOuter.style.transform = `scale(${outerScale})`;
-
-    el.ringInner.style.opacity = String(innerOpacity);
-    el.ringInner.style.transform = `scale(${innerScale})`;
+  async function ensureAudio() {
+    if (!state.audioOn) return;
+    if (!state.audio) state.audio = makeAudioEngine();
+    try {
+      if (state.audio.ctx.state !== "running") await state.audio.ctx.resume();
+    } catch {}
+    state.audioPerfZeroMs = performance.now() - state.audio.ctx.currentTime * 1000;
   }
 
   function audioTimeFromPerf(ms) {
@@ -667,104 +738,100 @@ splashPresents: $("splashPresents"),
     return Math.max(0, (ms - state.audioPerfZeroMs) / 1000);
   }
 
-  function packTuning() {
-    // small behavior based on selected pack
-    const pack = state.selectedPack;
-    if (pack === "neon") return { hatTone: 10500, bassDrive: 0.95, leadAmp: 0.26 };
-    if (pack === "acid") return { hatTone: 9800, bassDrive: 1.05, leadAmp: 0.24 };
-    return { hatTone: 9000, bassDrive: 0.85, leadAmp: 0.22 };
-  }
+  // ---------- Scheduling ----------
+  let rafId = 0;
+  let schedTimer = 0;
 
   function scheduleAudio() {
-    if (!state.audioOn || !state.audio || state.paused || !state.running) return;
+    if (!state.running || state.paused || !state.audioOn || !state.audio) return;
 
-    const ctx = state.audio.ctx;
-    const lookAhead = 0.14; // seconds
+    const lookAhead = 0.16; // seconds
     const interval = 25; // ms
+    const perfNow = performance.now();
+    const windowEnd = perfNow + lookAhead * 1000;
 
-    const perfNow = nowMs();
-    const windowEndPerf = perfNow + lookAhead * 1000;
-
-    const tune = packTuning();
-
-    while (state.nextBeatAtMs <= windowEndPerf) {
+    while (state.nextBeatAtMs <= windowEnd) {
       const t = audioTimeFromPerf(state.nextBeatAtMs);
+      const beat = state.beatsCount;
+      const beatInBar = beat % 4;
+      const beatIn8 = beat % 8;
 
-      const beatInBar = state.beatsThisRun % 4; // 0..3
-      const beatIn8 = state.beatsThisRun % 8;
+      // energy and “chorus” progression
+      // - energy rises with combo (fast)
+      // - chorus rises with time + energy (slower)
+      const elapsed = (performance.now() - state.runStartMs) / 1000;
+      state.energy = Math.max(0, Math.min(1, state.combo / 28));
+      state.chorus = Math.max(0, Math.min(1, (elapsed / 45) * 0.55 + state.energy * 0.65));
 
-      // difficulty drift
-      if (state.mode === "drift" && beatIn8 === 0) {
-        state.drift += (Math.random() * 2 - 1) * 10; // +/- 10ms
-        state.drift = clamp(state.drift, -30, 30);
+      // lift the lowpass cutoff as we approach chorus
+      const cutoff = 900 + state.chorus * 4200;
+      state.audio.glue.frequency.setValueAtTime(cutoff, t);
+
+      // Base groove: kick + hats start immediately (less boring)
+      state.audio.kick(t, 1.0);
+
+      // hats (8ths, with small humanization)
+      const hatTone = 9800 + state.chorus * 1200;
+      const hatAmp = 0.32 + state.energy * 0.22;
+      state.audio.hat(t + (Math.random() * 0.004), hatTone, hatAmp, 0.055);
+
+      const offTime = t + (state.beatMs / 1000) * 0.5;
+      const skip = (beatIn8 === 3 || beatIn8 === 7) && Math.random() < (0.15 - state.chorus * 0.10);
+      if (!skip) state.audio.hat(offTime, hatTone, hatAmp * 0.75, 0.05);
+
+      // clap enters early but “breathes” (drops occasionally)
+      const clapOn = state.energy > 0.20 || elapsed > 8;
+      if (clapOn && (beatInBar === 1 || beatInBar === 3)) {
+        const drop = (state.chorus > 0.55) && (beatInBar === 1) && Math.random() < 0.25;
+        if (!drop) state.audio.clap(t, 0.75 + state.chorus * 0.25);
       }
 
-      // ----- base pattern -----
-      if (state.layers.kick && (beatInBar === 0 || beatInBar === 2)) state.audio.kick(t);
-
-      // hat pattern (varies with level/energy)
-      if (state.layers.hat) {
-        const energy = clamp(state.combo / 30, 0, 1);
-        const hatAmp = 0.45 + energy * 0.25;
-        state.audio.hat(t, tune.hatTone, hatAmp, 0.06);
-
-        // off-hat on 8th notes; sometimes skip to create groove
-        const tOff = t + (state.beatMs / 1000) * 0.5;
-        const skip = (state.level % 3 === 0) && (beatIn8 === 3 || beatIn8 === 7) && Math.random() < 0.35;
-        if (!skip) state.audio.hat(tOff, tune.hatTone, hatAmp * 0.7, 0.05);
-      }
-
-      // clap on 2 & 4; sometimes “drop” it for tension every few levels
-      if (state.layers.clap) {
-        const drop = (state.level % 4 === 0) && (beatInBar === 1) && Math.random() < 0.45;
-        if (!drop && (beatInBar === 1 || beatInBar === 3)) state.audio.clap(t, 0.85);
-      }
-
-      // bass on offbeats; add variation
-      if (state.layers.bass) {
+      // bass enters with energy
+      if (state.energy > 0.25 || elapsed > 12) {
         const tBass = t + (state.beatMs / 1000) * 0.5;
-        const base = beatInBar === 0 || beatInBar === 2 ? 55 : 65;
-        const varHz = (state.level % 5 === 0 && beatInBar === 3) ? 73 : base;
-        state.audio.bass(tBass, varHz, tune.bassDrive);
+        const base = (beatInBar === 0 || beatInBar === 2) ? 55 : 65;
+        const lift = state.chorus > 0.70 && beatInBar === 3 ? 73 : base;
+        state.audio.bass(tBass, lift, 0.75 + state.chorus * 0.35);
       }
 
-      // lead: tiny motifs to prevent boredom
-      if (state.layers.lead) {
-        const scale = [392, 440, 523.25, 587.33]; // G4 A4 C5 D5
-        const pick = scale[(state.beatsThisRun + state.level) % scale.length];
-        const on = (beatIn8 === 1 || beatIn8 === 5) || (Math.random() < 0.12);
-        if (on) state.audio.lead(t, pick, tune.leadAmp, 0.11);
+      // pad/lead motifs to stop boredom
+      if (elapsed > 6) {
+        const chord = [220, 277.18, 329.63, 392.00]; // A, C#, E, G-ish vibe
+        const idx = (beat + Math.floor(elapsed / 8)) % chord.length;
+        const pFreq = chord[idx];
+        if (beatInBar === 0) state.audio.pad(t, pFreq, 0.10 + state.chorus * 0.10, 0.24);
       }
 
-      // ----- beat bookkeeping -----
+      if (state.chorus > 0.35) {
+        // lead on 2 & 4-ish, more frequent toward chorus
+        const scale = [392, 440, 523.25, 587.33, 659.25]; // G A C D E
+        const pick = scale[(beat + Math.floor(state.energy * 10)) % scale.length];
+        const chance = 0.18 + state.chorus * 0.22;
+        if ((beatIn8 === 1 || beatIn8 === 5) || Math.random() < chance) {
+          state.audio.lead(t, pick, 0.12 + state.chorus * 0.10, 0.11);
+        }
+      }
+
+      // Beat bookkeeping
       state.lastBeatAtMs = state.nextBeatAtMs;
-      state.nextBeatAtMs += state.beatMs + state.drift;
-      state.beatsThisRun += 1;
+      state.beatsCount += 1;
 
-      // movement cue: move every N beats once enabled
-      if (state.moveEnabled && state.beatsThisRun % state.moveEveryBeats === 0) moveTargetNext();
+      // Move target every N beats
+      if (state.moveEnabled && state.beatsCount % state.moveEveryBeats === 0) pickNextPosition();
 
-      // progress bar + level up
-      const progress = (state.beatsThisRun % state.beatsPerLevel) / state.beatsPerLevel;
-      el.bar.style.width = `${Math.floor(progress * 100)}%`;
+      // Dynamic BPM ramp: time + combo → faster
+      const elapsed2 = (performance.now() - state.runStartMs) / 1000;
+      const ramp = (elapsed2 * 0.55) + (state.combo * 0.45);
+      const newBpm = Math.min(state.bpmMax, state.baseBpm + ramp);
+      state.bpm = newBpm;
+      recomputeBeat();
 
-      if (state.beatsThisRun % state.beatsPerLevel === 0) {
-        state.level += 1;
-        el.lvl.textContent = String(state.level);
+      state.nextBeatAtMs += state.beatMs;
 
-        // tighten windows slowly
-        state.perfect = Math.max(28, state.perfect - 2);
-        state.great = Math.max(72, state.great - 1);
-        state.ok = Math.max(110, state.ok - 1);
-
-        // small “drop” flash
-        toast(`Level ${state.level}`);
-        awardAchievement("level_5");
-
-        // at higher levels, speed up movement a bit
-        if (state.level === 3) state.moveEveryBeats = 3;
-        if (state.level === 6) state.moveEveryBeats = 2;
-      }
+      // UI
+      if (el.lvl) el.lvl.textContent = String(1 + Math.floor(elapsed2 / 20));
+      if (el.energy) el.energy.textContent = `Energy: ${Math.floor(state.energy * 100)}%`;
+      if (el.trackState) el.trackState.textContent = `Vibe: ${state.chorus > 0.65 ? "Chorus" : "Verse"}`;
     }
 
     schedTimer = window.setTimeout(scheduleAudio, interval);
@@ -777,9 +844,13 @@ splashPresents: $("splashPresents"),
     const loop = () => {
       if (!state.running || state.paused) return;
 
-      const ttn = state.nextBeatAtMs - nowMs();
-      const phase = 1 - ttn / state.beatMs;
+      // ring phase based on next beat
+      const ttn = state.nextBeatAtMs - performance.now();
+      const phase = 1 - (ttn / state.beatMs);
       renderRing(((phase % 1) + 1) % 1);
+
+      // smooth glide step
+      stepGlide();
 
       rafId = requestAnimationFrame(loop);
     };
@@ -794,463 +865,271 @@ splashPresents: $("splashPresents"),
     schedTimer = 0;
   }
 
-  // ---------- Combo unlocks / progression ----------
-  function applyComboUnlocks() {
-    if (state.combo >= 4) state.layers.hat = true;
-    if (state.combo >= 10) state.layers.clap = true;
-    if (state.combo >= 16) state.layers.bass = true;
-    if (state.combo >= 22) state.layers.lead = true;
-    updateTrackStateLabel();
-    updateEnergyUI();
+  // ---------- Scoring / judgement ----------
+  function awardCoins(n) {
+    if (n <= 0) return;
+    state.coins += n;
+    if (el.coins) el.coins.textContent = String(state.coins);
+    saveSettings();
   }
 
-  // ---------- Tap judgement ----------
-  function coinReward(kind) {
-    if (kind === "perfect") return 4;
-    if (kind === "great") return 2;
-    if (kind === "ok") return 1;
-    return 0;
-  }
-
-  function judgeTap() {
-    if (!state.running || state.paused) return;
-
-    // visual feedback always
-    spawnRipple();
-
-    const t = nowMs();
-    const dLast = Math.abs(t - state.lastBeatAtMs);
-    const dNext = Math.abs(state.nextBeatAtMs - t);
-    const delta = Math.min(dLast, dNext);
+  function judgeTap(perfDeltaMs, wasInside) {
+    if (!wasInside) {
+      // Tap outside the circle = MISS (meaningful)
+      state.combo = 0;
+      if (el.combo) el.combo.textContent = "0";
+      setAnimeJudge("MISS", "miss");
+      vibrate(18);
+      return;
+    }
 
     let kind = "miss";
     let base = 0;
 
-    if (delta <= state.perfect) { kind = "perfect"; base = 120; }
-    else if (delta <= state.great) { kind = "great"; base = 70; }
-    else if (delta <= state.ok) { kind = "ok"; base = 35; }
+    if (perfDeltaMs <= state.perfect) { kind = "perfect"; base = 120; }
+    else if (perfDeltaMs <= state.great) { kind = "great"; base = 70; }
+    else if (perfDeltaMs <= state.ok) { kind = "ok"; base = 35; }
     else { kind = "miss"; base = 0; }
 
     if (kind === "miss") {
       state.combo = 0;
-      state.perfectStreak = 0;
-      setJudge("MISS", "miss");
-      vibrate(20);
-      flashTarget("rgba(255,92,138,0.25)");
-    } else {
-      state.combo += 1;
-      const mult = 1 + Math.min(2.4, state.combo / 24);
-      const earned = Math.floor(base * mult);
-      state.score += earned;
-
-      // coins
-      const c = coinReward(kind) + (state.combo >= 15 ? 1 : 0);
-      state.coins += c;
-
-      el.score.textContent = String(state.score);
-      el.combo.textContent = String(state.combo);
-      el.coins.textContent = String(state.coins);
-
-      if (kind === "perfect") {
-        state.perfectStreak += 1;
-        state.totalPerfectThisRun += 1;
-        setJudge("PERFECT", "perfect");
-        vibrate(10);
-        flashTarget("rgba(181,31,58,0.35)");
-        spawnParticles("perfect");
-      } else if (kind === "great") {
-        state.perfectStreak = 0;
-        setJudge("GREAT", "great");
-        vibrate(6);
-        flashTarget("rgba(255,209,102,0.22)");
-        spawnParticles("great");
-      } else {
-        state.perfectStreak = 0;
-        setJudge("OK", "ok");
-        vibrate(4);
-        flashTarget("rgba(123,223,242,0.18)");
-        spawnParticles("ok");
-      }
+      if (el.combo) el.combo.textContent = "0";
+      setAnimeJudge("MISS", "miss");
+      vibrate(18);
+      return;
     }
 
-    applyComboUnlocks();
-    saveSettings();
+    state.combo += 1;
+    const mult = 1 + Math.min(2.5, state.combo / 26);
+    const earned = Math.floor(base * mult);
+    state.score += earned;
 
-    // achievements triggers
-    if (state.score >= 1000) awardAchievement("score_1000");
-    if (state.combo >= 10) awardAchievement("combo_10");
-    if (state.combo >= 25) awardAchievement("combo_25");
-    if (state.combo >= 50) awardAchievement("combo_50");
-    if (state.perfectStreak >= 8) awardAchievement("perfect_8");
+    if (el.score) el.score.textContent = String(state.score);
+    if (el.combo) el.combo.textContent = String(state.combo);
+
+    // coin rewards: Perfect feels juicy
+    const coin = (kind === "perfect") ? 4 : (kind === "great") ? 2 : 1;
+    awardCoins(coin + (state.combo >= 18 ? 1 : 0));
+
+    if (kind === "perfect") {
+      setAnimeJudge("PERFECT!", "perfect");
+      vibrate(8);
+    } else if (kind === "great") {
+      setAnimeJudge("GREAT!", "great");
+      vibrate(5);
+    } else {
+      setAnimeJudge("OK!", "ok");
+      vibrate(3);
+    }
+  }
+
+  // ---------- Input (tap ONLY on circle) ----------
+  function onPointerDown(e) {
+    if (!state.running || state.paused) return;
+
+    // Use touch point
+    const x = e.clientX;
+    const y = e.clientY;
+
+    const inside = pointInsideTarget(x, y);
+
+    // delta to nearest beat
+    const t = performance.now();
+    const dLast = Math.abs(t - state.lastBeatAtMs);
+    const dNext = Math.abs(state.nextBeatAtMs - t);
+    const delta = Math.min(dLast, dNext);
+
+    judgeTap(delta, inside);
+  }
+
+  // Attach pointerdown ONLY to playfield so taps outside playfield don’t matter
+  function bindInput() {
+    el.playfield.addEventListener("pointerdown", (e) => {
+      // Prevent accidental scroll
+      e.preventDefault();
+      onPointerDown(e);
+    }, { passive: false });
+  }
+
+  // ---------- Menus (single gear) ----------
+  function hideOldTopButtons() {
+    // If your old topbar still exists, we visually hide it (we don’t delete to avoid breaking your HTML)
+    const topbar = document.querySelector(".topbar");
+    if (topbar) topbar.style.display = "none";
+  }
+
+  function showOverlay(id) {
+    const ov = $(id);
+    if (!ov) return;
+    ov.classList.remove("hidden");
+  }
+  function hideOverlay(id) {
+    const ov = $(id);
+    if (!ov) return;
+    ov.classList.add("hidden");
+  }
+
+  function openMenu() {
+    showOverlay("mainMenuOverlay");
+  }
+  function closeMenu() {
+    hideOverlay("mainMenuOverlay");
   }
 
   // ---------- Game lifecycle ----------
-  async function ensureAudio() {
-    if (!state.audioOn) return;
-    if (!state.audio) state.audio = makeAudioEngine();
-    try {
-      if (state.audio.ctx.state !== "running") await state.audio.ctx.resume();
-    } catch (_) {}
-    state.audioPerfZeroMs = nowMs() - state.audio.ctx.currentTime * 1000;
-  }
-
-  async function startGame() {
-    state.mode = el.modeSelect.value;
-    state.bpm = parseInt(el.bpmSelect.value, 10);
-
-    state.hapticsOn = !!el.haptics.checked;
-    state.audioOn = !!el.sound.checked;
-    state.tutorialOn = !!el.tutorial.checked;
-
-    // reset run
+  async function startRun() {
     state.running = true;
     state.paused = false;
     state.score = 0;
     state.combo = 0;
-    state.level = 1;
 
-    state.beatsThisRun = 0;
-    state.perfect = 42;
-    state.great = 90;
-    state.ok = 135;
-
-    state.perfectStreak = 0;
-    state.totalPerfectThisRun = 0;
-    state.runStartedAt = Date.now();
-
-    state.layers.kick = true;
-    state.layers.hat = false;
-    state.layers.clap = false;
-    state.layers.bass = false;
-    state.layers.lead = false;
-
-    state.drift = 0;
-    state.moveEveryBeats = 4;
-
+    state.baseBpm = 108;
+    state.bpm = state.baseBpm;
     recomputeBeat();
-    updateTrackStateLabel();
-    updateEnergyUI();
 
-    el.score.textContent = "0";
-    el.combo.textContent = "0";
-    el.lvl.textContent = "1";
-    el.bar.style.width = "0%";
-    el.hint.textContent = "TAP ON THE BEAT";
-    el.judge.textContent = "";
+    state.runStartMs = performance.now();
+    state.beatsCount = 0;
 
-    // movement: locked until tutorial completes (or tutorial disabled)
-    state.moveEnabled = !state.tutorialOn;
-    applyTargetPosition(0.5, 0.5);
+    if (el.score) el.score.textContent = "0";
+    if (el.combo) el.combo.textContent = "0";
 
-    // audio init only on user gesture
+    // initial beat anchors
+    const n = performance.now();
+    state.lastBeatAtMs = n;
+    state.nextBeatAtMs = n + state.beatMs;
+
+    // movement start
+    state.pos.x = 0.5; state.pos.y = 0.5;
+    state.posTarget.x = 0.5; state.posTarget.y = 0.5;
+    applyTargetCSS(0.5, 0.5);
+    pickNextPosition();
+
+    // audio
     await ensureAudio();
 
-    // set beat anchors
-    const n = nowMs();
-    state.lastBeatAtMs = n;
-    state.nextBeatAtMs = n + state.beatMs;
-
-    el.startOverlay.classList.add("hidden");
-    el.pauseOverlay.classList.add("hidden");
-
-    awardAchievement("first_run");
-
-    // optional tutorial overlay
-    if (state.tutorialOn) openTutorial();
+    closeMenu();
+    setAnimeJudge("GO!", "great");
 
     startLoops();
   }
 
-  function pauseGame() {
-    if (!state.running || state.paused) return;
-    state.paused = true;
-    stopLoops();
-    el.pauseOverlay.classList.remove("hidden");
-  }
-
-  function resumeGame() {
-    if (!state.running || !state.paused) return;
-    state.paused = false;
-
-    // re-anchor timing
-    const n = nowMs();
-    state.lastBeatAtMs = n;
-    state.nextBeatAtMs = n + state.beatMs;
-
-    if (state.audio && state.audio.ctx) {
-      state.audioPerfZeroMs = nowMs() - state.audio.ctx.currentTime * 1000;
-    }
-
-    el.pauseOverlay.classList.add("hidden");
-    startLoops();
-  }
-
-  function restartGame() {
+  function stopRun() {
     stopLoops();
     state.running = false;
     state.paused = false;
-
-    el.pauseOverlay.classList.add("hidden");
-    el.tutorialOverlay.classList.add("hidden");
-    el.achOverlay.classList.add("hidden");
-    el.shopOverlay.classList.add("hidden");
-    el.settingsOverlay.classList.add("hidden");
-
-    el.startOverlay.classList.remove("hidden");
-    saveSettings();
+    closeMenu();
   }
 
-  // ---------- Overlays control ----------
-  function overlayVisible() {
-    const ids = [
-      el.startOverlay,
-      el.pauseOverlay,
-      el.tutorialOverlay,
-      el.achOverlay,
-      el.shopOverlay,
-      el.settingsOverlay,
-    ];
-    return ids.some((o) => o && !o.classList.contains("hidden"));
-  }
-
-  function openAchievements() {
-    renderAchievements();
-    el.achOverlay.classList.remove("hidden");
-  }
-
-  function openShop() {
-    renderShop();
-    el.shopOverlay.classList.remove("hidden");
-  }
-
-  function openSettings() {
-    el.setHaptics.checked = state.hapticsOn;
-    el.setSound.checked = state.audioOn;
-    el.setTutorial.checked = state.tutorialOn;
-    el.settingsOverlay.classList.remove("hidden");
-  }
-
-  function closeSettings() {
-    el.settingsOverlay.classList.add("hidden");
-  }
-
-  // ---------- Events ----------
-  function onPointerDown(e) {
-    // ignore taps on overlays
-    if (overlayVisible()) return;
-    e.preventDefault();
-    judgeTap();
-  }
-
-  el.stage.addEventListener("pointerdown", onPointerDown, { passive: false });
-
-  el.btnStart.addEventListener("click", startGame);
-
-  el.btnPause.addEventListener("click", () => {
-    if (!state.running) return;
-    if (state.paused) resumeGame();
-    else pauseGame();
-  });
-
-  el.btnResume.addEventListener("click", resumeGame);
-  el.btnRestart.addEventListener("click", restartGame);
-
-  el.btnAchievements.addEventListener("click", () => {
-    if (!state.running) return;
-    openAchievements();
-  });
-  el.btnAchClose.addEventListener("click", () => el.achOverlay.classList.add("hidden"));
-
-  el.btnShop.addEventListener("click", () => {
-    if (!state.running) return;
-    openShop();
-  });
-  el.btnShopClose.addEventListener("click", () => el.shopOverlay.classList.add("hidden"));
-
-  el.btnSettings.addEventListener("click", () => {
-    if (!state.running) return;
-    openSettings();
-  });
-  el.btnSettingsClose.addEventListener("click", closeSettings);
-
-  // tutorial buttons
-  el.btnTBack.addEventListener("click", () => {
-    tutorialStep = Math.max(0, tutorialStep - 1);
-    updateTutorialUI();
-  });
-  el.btnTNext.addEventListener("click", () => {
-    tutorialStep = Math.min(TUTORIAL_STEPS.length - 1, tutorialStep + 1);
-    updateTutorialUI();
-  });
-  el.btnTSkip.addEventListener("click", () => {
-    closeTutorial();
-    toast("Tutorial complete.");
-  });
-
-  // Settings toggles
-  el.setHaptics.addEventListener("change", () => {
-    state.hapticsOn = !!el.setHaptics.checked;
-    if (el.haptics) el.haptics.checked = state.hapticsOn;
-    saveSettings();
-    toast(state.hapticsOn ? "Haptics on" : "Haptics off");
-  });
-
-  el.setSound.addEventListener("change", async () => {
-    state.audioOn = !!el.setSound.checked;
-    if (el.sound) el.sound.checked = state.audioOn;
-    saveSettings();
-
-    if (state.audioOn) {
-      await ensureAudio();
-      toast("Sound on");
-      // restart scheduler if running
-      if (state.running && !state.paused) scheduleAudio();
-    } else {
-      toast("Sound off");
+  // ---------- Splash longer, then main menu ----------
+  function runSplashIfPresent() {
+    const splash = el.splashOverlay;
+    if (!splash) {
+      // no splash in HTML — just show menu immediately
+      openMenu();
+      return;
     }
-  });
 
-  el.setTutorial.addEventListener("change", () => {
-    state.tutorialOn = !!el.setTutorial.checked;
-    if (el.tutorial) el.tutorial.checked = state.tutorialOn;
-    saveSettings();
-    toast(state.tutorialOn ? "Tutorial on" : "Tutorial off");
-  });
+    // hide any old start overlay
+    if (el.startOverlay) el.startOverlay.classList.add("hidden");
 
-  // Keyboard (desktop)
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" || e.code === "Enter") {
-      if (!overlayVisible()) judgeTap();
-    }
-    if (e.code === "Escape") {
-      if (!state.running) return;
-      if (state.paused) resumeGame();
-      else pauseGame();
-    }
-  });
+    // “presents” appears
+    setTimeout(() => {
+      if (el.splashPresents) el.splashPresents.classList.add("show");
+    }, 850);
 
-  // iOS Safari sometimes selects on long press; prevent
-  document.addEventListener("gesturestart", (e) => e.preventDefault());
+    // keep splash longer
+    setTimeout(() => {
+      splash.classList.add("fade-out");
+    }, 2550);
 
-  // ---------- Shop/Achievements CSS helpers (inline if missing) ----------
-  // If your CSS doesn't define these, the UI still works; it just looks plain.
-  // (No action needed.)
-
-  // ---------- Tutorial UI update (needs function defined earlier) ----------
-  function updateTutorialUI() {
-    const s = TUTORIAL_STEPS[tutorialStep];
-    el.tTitle.textContent = s.title;
-    el.tText.textContent = s.text;
-
-    el.btnTBack.disabled = tutorialStep === 0;
-    el.btnTNext.disabled = tutorialStep === TUTORIAL_STEPS.length - 1;
-
-    try { s.action && s.action(); } catch (_) {}
+    setTimeout(() => {
+      splash.classList.add("hidden");
+      openMenu();
+    }, 3200);
   }
 
-  // close tutorial when overlay is hidden by outside actions (optional)
-  el.tutorialOverlay.addEventListener("click", (e) => {
-    // only if user clicks backdrop (not card)
-    if (e.target === el.tutorialOverlay) {
-      closeTutorial();
-      toast("Tutorial complete.");
-    }
-  });
+  // ---------- Settings overlay minimal (if your HTML has it, we use it; if not, we use menu buttons) ----------
+  function bindMenuButtons() {
+    const gear = $("gearBtn");
+    if (gear) gear.addEventListener("click", () => {
+      if (!state.running) openMenu();
+      else openMenu(); // same menu during game
+    });
 
-  // ---------- Initial load ----------
-  
+    const play = $("menuPlay");
+    const settingsBtn = $("menuSettings");
+    const shopBtn = $("menuShop");
+    const goalsBtn = $("menuGoals");
+
+    if (play) play.addEventListener("click", startRun);
+
+    if (settingsBtn) settingsBtn.addEventListener("click", () => {
+      // If you already have settingsOverlay in HTML, show it; else simple quick toggles via confirm-like UI
+      if (el.settingsOverlay) showOverlay(el.settingsOverlay.id);
+      else {
+        state.hapticsOn = !state.hapticsOn;
+        state.audioOn = !state.audioOn;
+        saveSettings();
+        toast(`Haptics ${state.hapticsOn ? "ON" : "OFF"} • Sound ${state.audioOn ? "ON" : "OFF"}`);
+      }
+    });
+
+    if (shopBtn) shopBtn.addEventListener("click", () => {
+      if (el.shopOverlay) showOverlay(el.shopOverlay.id);
+      else toast("Shop coming soon (stub).");
+    });
+
+    if (goalsBtn) goalsBtn.addEventListener("click", () => {
+      if (el.achOverlay) showOverlay(el.achOverlay.id);
+      else toast("Goals coming soon (stub).");
+    });
+
+    // Close overlays if your HTML has close buttons
+    const closeButtons = document.querySelectorAll("[data-close-overlay]");
+    closeButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-close-overlay");
+        hideOverlay(id);
+      });
+    });
+  }
+
+  // If your settings overlay exists, wire toggles if present
+  function bindSettingsToggles() {
+    if (el.setHaptics) {
+      el.setHaptics.checked = state.hapticsOn;
+      el.setHaptics.addEventListener("change", () => {
+        state.hapticsOn = !!el.setHaptics.checked;
+        saveSettings();
+        toast(state.hapticsOn ? "Haptics ON" : "Haptics OFF");
+      });
+    }
+    if (el.setSound) {
+      el.setSound.checked = state.audioOn;
+      el.setSound.addEventListener("change", async () => {
+        state.audioOn = !!el.setSound.checked;
+        saveSettings();
+        if (state.audioOn) await ensureAudio();
+        toast(state.audioOn ? "Sound ON" : "Sound OFF");
+      });
+    }
+  }
+
+  // ---------- Boot ----------
+  injectStylesOnce();
+  createAnimeHUD();
+  createGearButton();
+  createMainMenuOverlay();
+  hideOldTopButtons();
+
   loadSettings();
-  recomputeBeat();
-  updateTrackStateLabel();
-  updateEnergyUI();
-  
-  // ----- Splash intro -----
-(function runSplash(){
-  if (!el.splashOverlay) return;
+  bindInput();
+  bindMenuButtons();
+  bindSettingsToggles();
 
-  // На время интро спрячем start overlay, чтобы не мигал под ним
-  if (el.startOverlay) el.startOverlay.classList.add("hidden");
+  // Keep target positioned correctly on resize/orientation
+  window.addEventListener("resize", () => applyTargetCSS(state.pos.x, state.pos.y));
 
-  // Показать "presents" чуть позже
-  setTimeout(() => {
-    if (el.splashPresents) el.splashPresents.classList.add("show");
-  }, 650);
-
-  // Убрать splash и показать старт-экран
-  setTimeout(() => {
-    el.splashOverlay.classList.add("fade-out");
-  }, 1550);
-
-  setTimeout(() => {
-    el.splashOverlay.classList.add("hidden");
-    if (el.startOverlay) el.startOverlay.classList.remove("hidden");
-  }, 2050);
-})();
-
-  // Set initial target position on load
-  requestAnimationFrame(() => applyTargetPosition(0.5, 0.5));
-
-  // -------- Minimal toast CSS hook (if missing) --------
-  // If you didn't add toast styles, it still displays as plain text.
-  if (el.toast && !document.querySelector("style[data-tapbeat-toast]")) {
-    const st = document.createElement("style");
-    st.dataset.tapbeatToast = "1";
-    st.textContent = `
-      .toast{
-        position: fixed;
-        left: 50%;
-        bottom: calc(18px + env(safe-area-inset-bottom));
-        transform: translateX(-50%);
-        background: rgba(10,10,15,0.75);
-        border: 1px solid rgba(255,255,255,0.14);
-        color: rgba(255,255,255,0.92);
-        padding: 10px 12px;
-        border-radius: 999px;
-        box-shadow: 0 18px 60px rgba(0,0,0,0.55);
-        opacity: 0;
-        transition: opacity 200ms ease, transform 200ms ease;
-        pointer-events: none;
-        font-size: 0.9rem;
-        white-space: nowrap;
-        z-index: 80;
-      }
-      .toast.show{
-        opacity: 1;
-        transform: translateX(-50%) translateY(-2px);
-      }
-      .list .item{
-        padding: 12px 10px;
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.04);
-        border-radius: 14px;
-        margin: 10px 0;
-      }
-      .item-row{ display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-      .item-title{ font-weight: 900; letter-spacing: 0.02em; }
-      .item-desc{ color: rgba(255,255,255,0.64); font-size: 0.9rem; margin-top: 4px; line-height: 1.35; }
-      .item-reward{ color: rgba(255,255,255,0.72); font-weight: 800; white-space: nowrap; }
-      .shop-grid{ display:grid; gap: 10px; }
-      .shop-item{
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.04);
-        border-radius: 14px;
-        padding: 12px 12px;
-      }
-      .shop-name{ font-weight: 900; letter-spacing: 0.02em; }
-      .shop-desc{ color: rgba(255,255,255,0.64); font-size: 0.9rem; margin-top: 4px; line-height: 1.35; }
-      .shop-row{ display:flex; justify-content:space-between; align-items:center; margin-top: 10px; gap: 10px; }
-      .shop-price{ color: rgba(255,255,255,0.72); font-weight: 800; white-space: nowrap; }
-      .shop-btn{
-        border-radius: 999px;
-        padding: 10px 12px;
-        min-height: 40px;
-        border: 1px solid rgba(255,255,255,0.14);
-        background: rgba(255,255,255,0.06);
-        color: rgba(255,255,255,0.9);
-        font-weight: 800;
-      }
-      .shop-btn:active{ transform: scale(0.99); }
-    `;
-    document.head.appendChild(st);
-  }
+  // Splash → menu
+  runSplashIfPresent();
 })();
