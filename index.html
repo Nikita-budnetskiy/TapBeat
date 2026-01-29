@@ -2,171 +2,168 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b0b10" />
-  <title>TAPBEAT</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>TapBeat</title>
+
   <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-  <!-- SPLASH / INTRO -->
-  <div class="overlay splash" id="splashOverlay" aria-hidden="true">
-    <div class="splash-inner">
-      <div class="splash-title">Nota Bene studio</div>
-      <div class="splash-sub" id="splashPresents">presents</div>
+  <!-- SPLASH -->
+  <div id="splash" class="splash" aria-hidden="false">
+    <div class="splashCard">
+      <div class="splashBrand">Nota Bene studio</div>
+      <div class="splashPresents">presents</div>
+      <div class="splashShine"></div>
     </div>
   </div>
 
-  <!-- GAME APP -->
-  <div class="app">
-    <main class="stage" id="stage" aria-label="Game stage">
-
-      <!-- HUD -->
-      <div class="hud">
-        <div class="hud-block">
-          <div class="hud-label">SCORE</div>
-          <div class="hud-value" id="score">0</div>
-        </div>
-
-        <div class="hud-block">
-          <div class="hud-label">COMBO</div>
-          <div class="hud-value" id="combo">0</div>
-        </div>
-
-        <div class="hud-block">
-          <div class="hud-label">COINS</div>
-          <div class="hud-value" id="coins">0</div>
-        </div>
-
-        <div class="hud-right">
-          <div class="hud-mini">
-            <span class="hud-mini-label">BPM</span>
-            <span class="hud-mini-value" id="bpm">108</span>
-          </div>
-          <div class="hud-mini">
-            <span class="hud-mini-label">LVL</span>
-            <span class="hud-mini-value" id="lvl">1</span>
-          </div>
-        </div>
+  <!-- MAIN MENU -->
+  <div id="mainMenu" class="screen hidden" aria-hidden="true">
+    <div class="menuWrap">
+      <div class="logo">
+        <div class="logoTop">TapBeat</div>
+        <div class="logoSub">Bright rhythm tapping • unlock vibes • chase combos</div>
       </div>
 
-      <!-- PLAYFIELD -->
-      <section class="playfield" aria-label="Playfield">
-        <!-- Target (tap MUST be inside this circle) -->
-        <div class="target" id="target" aria-label="Tap target">
-          <div class="sweet" aria-hidden="true"></div>
-          <div class="ring ring-outer" id="ringOuter"></div>
-          <div class="ring ring-inner" id="ringInner"></div>
+      <div class="menuButtons">
+        <button id="btnPlay" class="btn btnPrimary">Play</button>
+        <button id="btnTutorial" class="btn btnGhost">Tutorial</button>
+        <button id="btnAchievements" class="btn btnGhost">Achievements</button>
+        <button id="btnShop" class="btn btnGhost">Shop</button>
+      </div>
 
-          <div class="core">
-            <div class="core-dot"></div>
-          </div>
-        </div>
-
-        <!-- Decorative scanlines / background sparks -->
-        <div class="bgfx" aria-hidden="true"></div>
-      </section>
-
-      <!-- Footer / vibe -->
-      <footer class="footer">
-        <div class="progress">
-          <div class="bar" id="bar"></div>
-        </div>
-        <div class="footer-row">
-          <div class="mini" id="trackState">Vibe: Verse</div>
-          <div class="mini" id="energy">Energy: 0%</div>
-        </div>
-      </footer>
-    </main>
+      <div class="menuFooter">
+        <div class="pill">Coins: <span id="coinsHome">0</span></div>
+        <div class="pill">Best Combo: <span id="bestComboHome">0</span></div>
+      </div>
+    </div>
   </div>
 
-  <!-- MAIN MENU (BIG BUTTONS) -->
-  <div class="overlay hidden" id="mainMenuOverlay" role="dialog" aria-modal="true">
-    <div class="menu-card">
-      <div class="menu-title">TAPBEAT</div>
-      <div class="menu-sub">
-        Tap the moving circle on the beat. Build energy. Unlock new vibes.
+  <!-- GAME -->
+  <div id="gameUI" class="game hidden" aria-hidden="true">
+    <!-- background FX layer -->
+    <div class="bgFX" aria-hidden="true"></div>
+
+    <!-- HUD -->
+    <div class="hud">
+      <div class="hudLeft">
+        <div class="hudItem">
+          <div class="hudLabel">SCORE</div>
+          <div id="hudScore" class="hudValue">0</div>
+        </div>
+        <div class="hudItem">
+          <div class="hudLabel">COMBO</div>
+          <div id="hudCombo" class="hudValue">0</div>
+        </div>
+        <div class="hudItem">
+          <div class="hudLabel">COINS</div>
+          <div id="hudCoins" class="hudValue">0</div>
+        </div>
       </div>
 
-      <div class="menu-grid">
-        <button class="menu-btn play" id="menuPlay" type="button">
-          <strong>Play</strong><span>▶</span>
-        </button>
+      <div class="hudRight">
+        <div class="hudMini">
+          <span class="hudMiniLabel">BPM</span>
+          <span id="hudBpm" class="hudMiniValue">92</span>
+        </div>
+        <div class="hudMini">
+          <span class="hudMiniLabel">LV</span>
+          <span id="hudLv" class="hudMiniValue">1</span>
+        </div>
 
-        <button class="menu-btn" id="menuSettings" type="button">
-          <strong>Settings</strong><span>⚙</span>
-        </button>
-
-        <button class="menu-btn" id="menuShop" type="button">
-          <strong>Shop</strong><span>🛍</span>
-        </button>
-
-        <button class="menu-btn" id="menuGoals" type="button">
-          <strong>Goals</strong><span>🏆</span>
+        <button id="btnGear" class="gear" aria-label="Settings">
+          <span class="gearIcon">⚙︎</span>
         </button>
       </div>
+    </div>
 
-      <p class="fine center">
-        Tip: tap only INSIDE the circle. Outside taps = MISS.
-      </p>
+    <!-- FEEDBACK (anime/comic style) -->
+    <div id="feedback" class="feedback" aria-live="polite"></div>
+
+    <!-- Canvas full screen -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Bottom bar -->
+    <div class="bottomBar">
+      <div class="bottomLeft">Vibe: <span id="hudVibe">Verse</span></div>
+      <div class="bottomRight">Energy: <span id="hudEnergy">0%</span></div>
     </div>
   </div>
 
-  <!-- SETTINGS OVERLAY -->
-  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true">
-    <div class="card">
-      <h2>Settings</h2>
+  <!-- OVERLAYS -->
+  <div id="overlayDim" class="overlayDim hidden" aria-hidden="true"></div>
 
-      <div class="row">
-        <label class="toggle">
-          <input type="checkbox" id="setHaptics" />
-          <span>Haptics</span>
-        </label>
+  <!-- SETTINGS PANEL -->
+  <div id="settingsPanel" class="panel hidden" aria-hidden="true">
+    <div class="panelHeader">
+      <div class="panelTitle">Settings</div>
+      <button id="btnCloseSettings" class="panelClose" aria-label="Close">✕</button>
+    </div>
 
-        <label class="toggle">
-          <input type="checkbox" id="setSound" />
-          <span>Sound</span>
-        </label>
-      </div>
+    <div class="panelBody">
+      <label class="toggleRow">
+        <span>Vibration</span>
+        <input id="toggleHaptics" type="checkbox" />
+      </label>
 
-      <div class="row">
-        <button class="primary" type="button" data-close-overlay="settingsOverlay">Close</button>
-      </div>
+      <label class="toggleRow">
+        <span>Sound</span>
+        <input id="toggleSound" type="checkbox" />
+      </label>
 
-      <p class="fine">
-        Note: some iPhones (Safari) may not support vibration. If so, haptics won’t trigger.
-      </p>
+      <div class="panelDivider"></div>
+
+      <button id="btnResume" class="btn btnPrimary">Resume</button>
+      <button id="btnBackToMenu" class="btn btnGhost">Back to Menu</button>
     </div>
   </div>
 
-  <!-- SHOP OVERLAY (stub) -->
-  <div class="overlay hidden" id="shopOverlay" role="dialog" aria-modal="true">
-    <div class="card">
-      <h2>Shop</h2>
-      <p class="lead">Stub for now. Unlockables will live here.</p>
-
-      <div class="row">
-        <button class="primary" type="button" data-close-overlay="shopOverlay">Close</button>
-      </div>
+  <!-- TUTORIAL -->
+  <div id="tutorialPanel" class="panel hidden" aria-hidden="true">
+    <div class="panelHeader">
+      <div class="panelTitle">Tutorial</div>
+      <button id="btnCloseTutorial" class="panelClose" aria-label="Close">✕</button>
+    </div>
+    <div class="panelBody">
+      <ol class="tutorialList">
+        <li><b>Tap only on the circle.</b> Tapping outside = <b>MISS</b>.</li>
+        <li>Hit close to the beat to get <b>GREAT</b> or <b>PERFECT</b>.</li>
+        <li>Keep combo — BPM rises and the music becomes richer.</li>
+        <li>Earn coins, unlock vibes and achievements.</li>
+      </ol>
+      <button id="btnStartFromTutorial" class="btn btnPrimary">Start Playing</button>
     </div>
   </div>
 
-  <!-- GOALS OVERLAY (stub) -->
-  <div class="overlay hidden" id="achOverlay" role="dialog" aria-modal="true">
-    <div class="card">
-      <h2>Goals</h2>
-      <p class="lead">Stub for now. Achievements + rewards will live here.</p>
-
-      <div class="row">
-        <button class="primary" type="button" data-close-overlay="achOverlay">Close</button>
-      </div>
+  <!-- ACHIEVEMENTS -->
+  <div id="achPanel" class="panel hidden" aria-hidden="true">
+    <div class="panelHeader">
+      <div class="panelTitle">Achievements</div>
+      <button id="btnCloseAch" class="panelClose" aria-label="Close">✕</button>
+    </div>
+    <div class="panelBody">
+      <div id="achList" class="achList"></div>
+      <button id="btnAchOk" class="btn btnPrimary">OK</button>
     </div>
   </div>
 
-  <!-- TOAST -->
-  <div class="toast" id="toast" aria-live="polite"></div>
+  <!-- SHOP (stub) -->
+  <div id="shopPanel" class="panel hidden" aria-hidden="true">
+    <div class="panelHeader">
+      <div class="panelTitle">Shop</div>
+      <button id="btnCloseShop" class="panelClose" aria-label="Close">✕</button>
+    </div>
+    <div class="panelBody">
+      <div class="shopStub">
+        <div class="shopBig">Coming soon ✨</div>
+        <div class="shopSmall">Skins, trails, vibes, boosters — later. For now: just enjoy.</div>
+      </div>
+      <button id="btnShopOk" class="btn btnPrimary">OK</button>
+    </div>
+  </div>
 
-  <!-- Your JS -->
   <script src="game.js"></script>
 </body>
 </html>
