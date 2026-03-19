@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>Prince Vertical Prototype</title>
+<title>Prince Vertical - Playable Prototype</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
   html, body {
@@ -37,6 +37,7 @@
     min-height: 50px;
     display: flex;
     align-items: center;
+    line-height: 1.35;
   }
   .stageWrap {
     flex: 1;
@@ -83,6 +84,7 @@
     text-align: center;
     font-size: 11px;
     color: #cdb58a;
+    line-height: 1.35;
   }
 </style>
 </head>
@@ -101,7 +103,7 @@
       <button class="btn" id="jump">↑</button>
     </div>
   </div>
-  <div class="tip">Вертикальный мобильный прототип. Доберись до ключа, потом до двери.</div>
+  <div class="tip">Теперь уровни сделаны проходимыми. Цель: ключ → дверь. После победы следующий уровень грузится сам.</div>
 </div>
 
 <script>
@@ -112,145 +114,220 @@
 
   const W = canvas.width;
   const H = canvas.height;
-  const gravity = 0.58;
-  const TILE = 48;
+  const TILE = 36;
+  const GRAVITY = 0.52;
+  const MAX_FALL = 12;
+  const RUN_SPEED = 3.7;
+  const JUMP_POWER = 10.8;
 
-  const level = [
-    "#########",
-    "#......D#",
-    "#.......#",
-    "#...###.#",
-    "#.......#",
-    "#..^....#",
-    "#....##.#",
-    "#.......#",
-    "#..###..#",
-    "#.......#",
-    "#....K..#",
-    "#.###...#",
-    "#.......#",
-    "#..^....#",
-    "#....##.#",
-    "#.......#",
-    "#P......#",
-    "#########"
+  const levels = [
+    [
+      "############",
+      "#.........D#",
+      "#..........#",
+      "#......###.#",
+      "#..........#",
+      "#....###...#",
+      "#..........#",
+      "#..###.....#",
+      "#..........#",
+      "#......K...#",
+      "#..........#",
+      "#....###...#",
+      "#..........#",
+      "#..###.....#",
+      "#..........#",
+      "#.###......#",
+      "#..........#",
+      "#P.........#",
+      "############"
+    ],
+    [
+      "############",
+      "#..D.......#",
+      "#..........#",
+      "#.###......#",
+      "#..........#",
+      "#.....###..#",
+      "#..........#",
+      "#...###....#",
+      "#..........#",
+      "#......K...#",
+      "#..........#",
+      "#....###...#",
+      "#..........#",
+      "#.###......#",
+      "#..........#",
+      "#.....###..#",
+      "#..........#",
+      "#P.........#",
+      "############"
+    ],
+    [
+      "############",
+      "#.........D#",
+      "#..........#",
+      "#....###...#",
+      "#..........#",
+      "#..^....^..#",
+      "#..........#",
+      "#.###......#",
+      "#..........#",
+      "#.....###..#",
+      "#..........#",
+      "#..K.......#",
+      "#..........#",
+      "#....###...#",
+      "#..........#",
+      "#..^....^..#",
+      "#..........#",
+      "#P.........#",
+      "############"
+    ]
   ];
 
-  const worldH = level.length * TILE;
-
   const input = { left:false, right:false, jump:false, jumpLatch:false };
+  let levelIndex = 0;
+  let current = null;
+  let spikes = [];
+  let particles = [];
+  let frame = 0;
+  let messageText = "Доберись до ключа, потом до двери";
+  let messageTimer = 0;
 
   const player = {
-    x: 0, y: 0, w: 24, h: 42,
+    x: 0, y: 0, w: 22, h: 38,
     vx: 0, vy: 0,
     onGround: false,
     facing: 1,
     hasKey: false,
     lives: 3,
     won: false,
-    anim: 0
+    anim: 0,
+    squash: 1,
+    stretch: 1,
+    coyote: 0
   };
 
-  let cameraY = 0;
-  let key = { x:0, y:0, w:20, h:20, taken:false };
-  let door = { x:0, y:0, w:36, h:48, open:false };
+  function flash(text, time = 120) {
+    messageText = text;
+    messageTimer = time;
+  }
 
-  function parseLevel() {
-    for (let y = 0; y < level.length; y++) {
-      for (let x = 0; x < level[y].length; x++) {
-        const c = level[y][x];
-        if (c === 'P') {
-          player.x = x * TILE + 12;
-          player.y = y * TILE + 4;
-        } else if (c === 'K') {
-          key.x = x * TILE + 14;
-          key.y = y * TILE + 14;
-        } else if (c === 'D') {
-          door.x = x * TILE + 6;
-          door.y = y * TILE;
+  function setHud() {
+    const levelNum = levelIndex + 1;
+    hud.textContent = `Уровень ${levelNum}/${levels.length} · Жизни ${player.lives} · Ключ ${player.hasKey ? "да" : "нет"} · ${messageTimer > 0 ? messageText : "Доберись до ключа, потом до двери"}`;
+  }
+
+  function parseLevel(index) {
+    const map = levels[index].map(r => r.split(""));
+    const data = {
+      map,
+      width: map[0].length,
+      height: map.length,
+      worldH: map.length * TILE,
+      door: {x:0, y:0, w:28, h:40, open:false},
+      key: {x:0, y:0, w:18, h:18, taken:false}
+    };
+    spikes = [];
+
+    for (let y = 0; y < map.length; y++) {
+      for (let x = 0; x < map[y].length; x++) {
+        const c = map[y][x];
+        if (c === "P") {
+          player.x = x * TILE + 7;
+          player.y = y * TILE - 2;
+          map[y][x] = ".";
+        } else if (c === "K") {
+          data.key.x = x * TILE + 10;
+          data.key.y = y * TILE + 10;
+          map[y][x] = ".";
+        } else if (c === "D") {
+          data.door.x = x * TILE + 4;
+          data.door.y = y * TILE;
+          map[y][x] = ".";
+        } else if (c === "^") {
+          spikes.push({x:x*TILE+5, y:y*TILE+18, w:TILE-10, h:18});
         }
       }
     }
+    return data;
+  }
+
+  function loadLevel(index, keepLives=true) {
+    current = parseLevel(index);
+    player.vx = 0;
+    player.vy = 0;
+    player.onGround = false;
+    player.facing = 1;
+    player.hasKey = false;
+    player.won = false;
+    player.anim = 0;
+    player.squash = 1;
+    player.stretch = 1;
+    player.coyote = 0;
+    current.door.open = false;
+    current.key.taken = false;
+    if (!keepLives) player.lives = 3;
+    cameraY = Math.max(0, Math.min(current.worldH - H, player.y - H * 0.65));
+    flash(`Уровень ${index + 1}`, 70);
+    setHud();
+  }
+
+  function rectsOverlap(a,b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
   function tileAt(tx, ty) {
-    if (ty < 0 || ty >= level.length || tx < 0 || tx >= level[0].length) return '#';
-    return level[ty][tx];
+    if (tx < 0 || ty < 0 || tx >= current.width || ty >= current.height) return "#";
+    return current.map[ty][tx];
   }
 
   function solidAt(px, py) {
     const tx = Math.floor(px / TILE);
     const ty = Math.floor(py / TILE);
     const t = tileAt(tx, ty);
-    if (t === '#') return true;
-    if (!door.open) {
-      if (px >= door.x && px < door.x + door.w && py >= door.y && py < door.y + door.h) return true;
+    if (t === "#") return true;
+    if (!current.door.open) {
+      if (px >= current.door.x && px < current.door.x + current.door.w && py >= current.door.y && py < current.door.y + current.door.h) return true;
     }
     return false;
   }
 
-  function overlap(a,b) {
-    return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
-  }
+  let cameraY = 0;
 
-  function message(text) {
-    hud.textContent = `Жизни: ${player.lives} · Ключ: ${player.hasKey ? 'да' : 'нет'} · ${text}`;
-  }
-
-  function reset(full=false) {
-    parseLevel();
-    player.vx = 0;
-    player.vy = 0;
-    player.onGround = false;
-    player.facing = 1;
-    player.won = false;
-    if (full) {
-      player.lives = 3;
-      player.hasKey = false;
-      key.taken = false;
-      door.open = false;
+  function spawnDust(x, y, n=5) {
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: -Math.random() * 1.1 - 0.2,
+        life: 20 + Math.random() * 12,
+        size: 2 + Math.random() * 2
+      });
     }
-    cameraY = Math.max(0, Math.min(worldH - H, player.y - H * 0.65));
-    message("Доберись до ключа, потом до двери");
   }
 
-  function die(reason) {
+  function killPlayer(reason) {
     player.lives -= 1;
     if (player.lives <= 0) {
-      reset(true);
-      message("Новая игра");
+      loadLevel(0, false);
+      flash("Все жизни кончились. Снова с начала", 150);
     } else {
-      const keepLives = player.lives;
-      const hadResetLives = player.lives;
-      const full = false;
-      parseLevel();
-      player.vx = 0; player.vy = 0; player.onGround = false; player.facing = 1; player.won = false;
-      player.hasKey = false; key.taken = false; door.open = false;
-      player.lives = keepLives;
-      cameraY = Math.max(0, Math.min(worldH - H, player.y - H * 0.65));
-      message(reason || "Осторожно");
+      loadLevel(levelIndex, true);
+      flash(reason, 110);
     }
+    setHud();
   }
 
-  function spikeRects() {
-    const out = [];
-    for (let y = 0; y < level.length; y++) {
-      for (let x = 0; x < level[y].length; x++) {
-        if (level[y][x] === '^') out.push({ x: x*TILE+6, y: y*TILE+22, w:TILE-12, h:20 });
-      }
-    }
-    return out;
-  }
-  const spikes = spikeRects();
-
-  function moveX(v) {
-    player.x += v;
-    if (v > 0) {
+  function moveX(vx) {
+    player.x += vx;
+    if (vx > 0) {
       if (solidAt(player.x + player.w, player.y + 3) || solidAt(player.x + player.w, player.y + player.h - 3)) {
         player.x = Math.floor((player.x + player.w) / TILE) * TILE - player.w - 0.01;
         player.vx = 0;
       }
-    } else if (v < 0) {
+    } else if (vx < 0) {
       if (solidAt(player.x, player.y + 3) || solidAt(player.x, player.y + player.h - 3)) {
         player.x = Math.floor(player.x / TILE + 1) * TILE + 0.01;
         player.vx = 0;
@@ -258,199 +335,308 @@
     }
   }
 
-  function moveY(v) {
-    player.y += v;
+  function moveY(vy) {
+    const wasOnGround = player.onGround;
+    player.y += vy;
     player.onGround = false;
-    if (v > 0) {
-      if (solidAt(player.x + 4, player.y + player.h) || solidAt(player.x + player.w - 4, player.y + player.h)) {
+
+    if (vy > 0) {
+      if (solidAt(player.x + 3, player.y + player.h) || solidAt(player.x + player.w - 3, player.y + player.h)) {
         player.y = Math.floor((player.y + player.h) / TILE) * TILE - player.h - 0.01;
         player.vy = 0;
         player.onGround = true;
+        if (!wasOnGround) {
+          player.squash = 0.78;
+          player.stretch = 1.18;
+          spawnDust(player.x + player.w / 2, player.y + player.h, 6);
+        }
       }
-    } else if (v < 0) {
-      if (solidAt(player.x + 4, player.y) || solidAt(player.x + player.w - 4, player.y)) {
+    } else if (vy < 0) {
+      if (solidAt(player.x + 3, player.y) || solidAt(player.x + player.w - 3, player.y)) {
         player.y = Math.floor(player.y / TILE + 1) * TILE + 0.01;
         player.vy = 0;
       }
     }
   }
 
+  function nextLevel() {
+    levelIndex += 1;
+    if (levelIndex >= levels.length) {
+      levelIndex = 0;
+      loadLevel(levelIndex, false);
+      flash("Ты прошёл все уровни. Игра началась заново", 170);
+    } else {
+      loadLevel(levelIndex, true);
+    }
+  }
+
+  function updateParticles() {
+    for (const p of particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= 1;
+      p.vy += 0.04;
+    }
+    particles = particles.filter(p => p.life > 0);
+  }
+
   function update() {
-    if (player.won) return;
+    frame += 1;
+    if (messageTimer > 0) messageTimer -= 1;
+    setHud();
+
+    if (player.won) {
+      if (messageTimer <= 0) nextLevel();
+      return;
+    }
+
+    const moving = input.left !== input.right;
 
     if (input.left && !input.right) {
-      player.vx = -3.6;
+      player.vx = -RUN_SPEED;
       player.facing = -1;
     } else if (input.right && !input.left) {
-      player.vx = 3.6;
+      player.vx = RUN_SPEED;
       player.facing = 1;
     } else {
       player.vx *= 0.72;
       if (Math.abs(player.vx) < 0.05) player.vx = 0;
     }
 
-    if (input.jump && player.onGround && !input.jumpLatch) {
-      player.vy = -10.5;
+    if (player.onGround) player.coyote = 7;
+    else if (player.coyote > 0) player.coyote -= 1;
+
+    if (input.jump && !input.jumpLatch && player.coyote > 0) {
+      player.vy = -JUMP_POWER;
       player.onGround = false;
+      player.coyote = 0;
       input.jumpLatch = true;
+      player.squash = 1.16;
+      player.stretch = 0.86;
     }
     if (!input.jump) input.jumpLatch = false;
 
-    player.vy += gravity;
-    if (player.vy > 14) player.vy = 14;
+    player.vy += GRAVITY;
+    if (player.vy > MAX_FALL) player.vy = MAX_FALL;
 
     moveX(player.vx);
     moveY(player.vy);
 
-    player.anim += Math.abs(player.vx) * 0.12;
+    player.anim += Math.abs(player.vx) * 0.16 + (player.onGround ? 0 : 0.04);
+    player.squash += (1 - player.squash) * 0.16;
+    player.stretch += (1 - player.stretch) * 0.16;
 
     for (const s of spikes) {
-      if (overlap(player, s)) {
-        die("Шипы");
+      if (rectsOverlap(player, s)) {
+        killPlayer("Шипы");
         return;
       }
     }
 
-    if (!key.taken && overlap(player, key)) {
-      key.taken = true;
+    if (!current.key.taken && rectsOverlap(player, current.key)) {
+      current.key.taken = true;
       player.hasKey = true;
-      door.open = true;
-      message("Ключ найден. Дверь открыта");
+      current.door.open = true;
+      flash("Ключ найден. Дверь открыта", 140);
     }
 
-    if (door.open && overlap(player, door)) {
+    if (current.door.open && rectsOverlap(player, current.door)) {
       player.won = true;
-      message("Победа");
+      flash("Уровень пройден", 110);
     }
 
-    if (player.y > worldH + 100) die("Падение");
+    if (player.y > current.worldH + 80) {
+      killPlayer("Слишком сильное падение");
+      return;
+    }
 
-    const target = player.y - H * 0.58;
-    cameraY += (target - cameraY) * 0.10;
-    cameraY = Math.max(0, Math.min(worldH - H, cameraY));
+    const targetCam = player.y - H * 0.55;
+    cameraY += (targetCam - cameraY) * 0.1;
+    cameraY = Math.max(0, Math.min(current.worldH - H, cameraY));
+
+    updateParticles();
   }
 
-  function drawBg() {
-    ctx.fillStyle = '#1b130d';
-    ctx.fillRect(0,0,W,H);
-    for (let i = 0; i < 7; i++) {
-      const x = 30 + i * 58;
-      ctx.fillStyle = i % 2 ? '#281b12' : '#24180f';
-      ctx.fillRect(x, 20, 16, H-40);
+  function drawBackground() {
+    ctx.fillStyle = "#1b130d";
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < 6; i++) {
+      const x = 22 + i * 70;
+      ctx.fillStyle = i % 2 ? "#24180f" : "#2b1d12";
+      ctx.fillRect(x, 0, 20, H);
     }
+
+    for (let i = 0; i < 10; i++) {
+      const y = (i * 88 + (frame * 0.15)) % (H + 80) - 40;
+      ctx.fillStyle = "rgba(255,220,140,0.05)";
+      ctx.fillRect(0, y, W, 2);
+    }
+  }
+
+  function drawTile(px, py) {
+    ctx.fillStyle = "#6d5431";
+    ctx.fillRect(px, py, TILE, TILE);
+    ctx.fillStyle = "#8d6d43";
+    ctx.fillRect(px + 3, py + 3, TILE - 6, TILE - 6);
+    ctx.fillStyle = "#c9a66d";
+    ctx.fillRect(px + 5, py + 5, 10, 4);
+    ctx.fillRect(px + 21, py + 5, 10, 4);
+    ctx.fillRect(px + 5, py + 21, 10, 4);
+    ctx.fillRect(px + 21, py + 21, 10, 4);
   }
 
   function drawWorld() {
     ctx.save();
     ctx.translate(0, -cameraY);
 
-    for (let y = 0; y < level.length; y++) {
-      for (let x = 0; x < level[y].length; x++) {
-        const c = level[y][x];
+    for (let y = 0; y < current.height; y++) {
+      for (let x = 0; x < current.width; x++) {
+        const c = current.map[y][x];
         const px = x * TILE;
         const py = y * TILE;
-        if (c === '#') {
-          ctx.fillStyle = '#6d5431';
+        if (c === "#") drawTile(px, py);
+        if (tileAt(x, y) === ".") {
+          ctx.fillStyle = "rgba(255,255,255,0.018)";
           ctx.fillRect(px, py, TILE, TILE);
-          ctx.fillStyle = '#8d6d43';
-          ctx.fillRect(px+4, py+4, TILE-8, TILE-8);
-          ctx.fillStyle = '#c9a66d';
-          ctx.fillRect(px+6, py+6, 14, 5);
-          ctx.fillRect(px+26, py+6, 14, 5);
-          ctx.fillRect(px+6, py+28, 14, 5);
-          ctx.fillRect(px+26, py+28, 14, 5);
-        }
-        if (c === '^') {
-          ctx.fillStyle = '#d7dde3';
-          for (let i = 0; i < 4; i++) {
-            const bx = px + i * 12;
-            ctx.beginPath();
-            ctx.moveTo(bx + 2, py + TILE);
-            ctx.lineTo(bx + 8, py + 18);
-            ctx.lineTo(bx + 14, py + TILE);
-            ctx.fill();
-          }
         }
       }
     }
 
-    if (!key.taken) {
-      ctx.strokeStyle = '#ffd36c';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(key.x + 8, key.y + 8, 8, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = '#ffd36c';
-      ctx.fillRect(key.x + 14, key.y + 6, 10, 4);
-      ctx.fillRect(key.x + 20, key.y + 6, 4, 12);
+    for (const s of spikes) {
+      ctx.fillStyle = "#d7dde3";
+      for (let i = 0; i < 3; i++) {
+        const bx = s.x + i * ((s.w) / 3);
+        ctx.beginPath();
+        ctx.moveTo(bx + 1, s.y + s.h);
+        ctx.lineTo(bx + s.w / 6, s.y);
+        ctx.lineTo(bx + s.w / 3 - 1, s.y + s.h);
+        ctx.fill();
+      }
     }
 
-    ctx.fillStyle = door.open ? 'rgba(140,200,140,0.45)' : '#5f7f8b';
-    ctx.fillRect(door.x, door.y, door.w, door.h);
-    ctx.fillStyle = door.open ? '#9ee37d' : '#9ab1bb';
-    ctx.fillRect(door.x+7, door.y+6, 5, 36);
-    ctx.fillRect(door.x+16, door.y+6, 5, 36);
-    ctx.fillRect(door.x+25, door.y+6, 5, 36);
+    if (!current.key.taken) {
+      const bob = Math.sin(frame * 0.12) * 3;
+      ctx.strokeStyle = "#ffd36c";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(current.key.x + 7, current.key.y + 7 + bob, 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#ffd36c";
+      ctx.fillRect(current.key.x + 12, current.key.y + 5 + bob, 9, 3);
+      ctx.fillRect(current.key.x + 17, current.key.y + 5 + bob, 3, 10);
+    }
 
+    ctx.fillStyle = current.door.open ? "rgba(140,200,140,0.45)" : "#5f7f8b";
+    ctx.fillRect(current.door.x, current.door.y, current.door.w, current.door.h);
+    ctx.fillStyle = current.door.open ? "#9ee37d" : "#9ab1bb";
+    ctx.fillRect(current.door.x + 5, current.door.y + 5, 4, 30);
+    ctx.fillRect(current.door.x + 12, current.door.y + 5, 4, 30);
+    ctx.fillRect(current.door.x + 19, current.door.y + 5, 4, 30);
+
+    const idleBob = Math.sin(frame * 0.08) * (player.onGround && Math.abs(player.vx) < 0.2 ? 1.4 : 0.3);
     const step = Math.sin(player.anim) * 3;
+    const stretchX = player.stretch;
+    const squashY = player.squash;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fillRect(player.x+4, player.y+player.h-2, player.w, 6);
+    const px = player.x;
+    const py = player.y + idleBob;
 
-    ctx.fillStyle = '#eadfc5';
-    ctx.fillRect(player.x+6, player.y+4, 12, 14);
-    ctx.fillRect(player.x+5, player.y+18, 14, 14);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(px + 3, py + player.h - 2, player.w, 5);
 
-    ctx.fillStyle = '#b83a2f';
-    ctx.fillRect(player.x+4, player.y+23, 16, 4);
+    ctx.save();
+    ctx.translate(px + player.w / 2, py + player.h / 2);
+    ctx.scale(stretchX, squashY);
+    ctx.translate(-(px + player.w / 2), -(py + player.h / 2));
 
-    ctx.fillStyle = '#eadfc5';
-    ctx.fillRect(player.x+6, player.y+32, 4, 10 + Math.max(0, step));
-    ctx.fillRect(player.x+13, player.y+32, 4, 10 + Math.max(0, -step));
-    ctx.fillRect(player.x + (player.facing === 1 ? 15 : 1), player.y + 18, 8, 4);
-    ctx.fillRect(player.x + 6, player.y + 18, 8, 4);
+    ctx.fillStyle = "#eadfc5";
+    ctx.fillRect(px + 5, py + 3, 12, 13);
+    ctx.fillRect(px + 4, py + 16, 14, 14);
 
-    ctx.fillStyle = '#111';
-    ctx.fillRect(player.x + (player.facing === 1 ? 13 : 8), player.y + 9, 2, 2);
+    ctx.fillStyle = "#b83a2f";
+    ctx.fillRect(px + 3, py + 21, 16, 4);
+
+    ctx.fillStyle = "#eadfc5";
+    if (player.onGround) {
+      ctx.fillRect(px + 5, py + 30, 4, 8 + Math.max(0, step));
+      ctx.fillRect(px + 12, py + 30, 4, 8 + Math.max(0, -step));
+    } else {
+      ctx.fillRect(px + 5, py + 29, 4, 9);
+      ctx.fillRect(px + 12, py + 32, 4, 6);
+    }
+
+    if (player.onGround) {
+      ctx.fillRect(px + (player.facing === 1 ? 14 : 0), py + 16, 8, 4);
+      ctx.fillRect(px + 5, py + 16, 8, 4);
+    } else {
+      ctx.fillRect(px + (player.facing === 1 ? 13 : 1), py + 18, 8, 3);
+      ctx.fillRect(px + 5, py + 15, 8, 3);
+    }
+
+    ctx.fillStyle = "#111";
+    ctx.fillRect(px + (player.facing === 1 ? 12 : 7), py + 8, 2, 2);
+    ctx.restore();
+
+    for (const p of particles) {
+      ctx.fillStyle = `rgba(240,220,180,${Math.max(0, p.life / 30)})`;
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+    }
 
     ctx.restore();
 
-    if (player.won) {
-      ctx.fillStyle = 'rgba(0,0,0,0.58)';
-      ctx.fillRect(70, 300, W-140, 110);
-      ctx.strokeStyle = '#c9a66d';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(70, 300, W-140, 110);
-      ctx.fillStyle = '#f1e0bb';
-      ctx.font = '28px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('ПОБЕДА', W/2, 345);
-      ctx.font = '14px monospace';
-      ctx.fillText('Обнови страницу для новой попытки', W/2, 380);
+    if (messageTimer > 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.42)";
+      ctx.fillRect(40, 25, W - 80, 38);
+      ctx.strokeStyle = "#c9a66d";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(40, 25, W - 80, 38);
+      ctx.fillStyle = "#f1e0bb";
+      ctx.font = "16px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(messageText, W / 2, 49);
     }
   }
 
   function loop() {
     update();
-    drawBg();
+    drawBackground();
     drawWorld();
     requestAnimationFrame(loop);
   }
 
   function bindHold(id, keyName) {
     const el = document.getElementById(id);
-    const on = (e) => { e.preventDefault(); input[keyName] = true; el.classList.add('pressed'); };
-    const off = (e) => { e.preventDefault(); input[keyName] = false; el.classList.remove('pressed'); };
-    ['touchstart','pointerdown','mousedown'].forEach(ev => el.addEventListener(ev, on, {passive:false}));
-    ['touchend','touchcancel','pointerup','pointercancel','mouseup','mouseleave'].forEach(ev => el.addEventListener(ev, off, {passive:false}));
+    const on = (e) => {
+      e.preventDefault();
+      input[keyName] = true;
+      el.classList.add("pressed");
+    };
+    const off = (e) => {
+      e.preventDefault();
+      input[keyName] = false;
+      el.classList.remove("pressed");
+    };
+    ["touchstart","pointerdown","mousedown"].forEach(ev => el.addEventListener(ev, on, {passive:false}));
+    ["touchend","touchcancel","pointerup","pointercancel","mouseup","mouseleave"].forEach(ev => el.addEventListener(ev, off, {passive:false}));
   }
 
-  bindHold('left', 'left');
-  bindHold('right', 'right');
-  bindHold('jump', 'jump');
+  bindHold("left", "left");
+  bindHold("right", "right");
+  bindHold("jump", "jump");
 
-  parseLevel();
-  message("Доберись до ключа, потом до двери");
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") input.left = true;
+    if (e.key === "ArrowRight") input.right = true;
+    if (e.key === "ArrowUp" || e.key === " ") input.jump = true;
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "ArrowLeft") input.left = false;
+    if (e.key === "ArrowRight") input.right = false;
+    if (e.key === "ArrowUp" || e.key === " ") input.jump = false;
+  });
+
+  loadLevel(0, false);
   loop();
 })();
 </script>
