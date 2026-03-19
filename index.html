@@ -1,0 +1,458 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Prince Vertical Prototype</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0;
+    background: #0d0b0a;
+    color: #f1e0bb;
+    font-family: monospace;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+  }
+  .app {
+    width: min(100vw, 480px);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)) 10px;
+    gap: 8px;
+    background: linear-gradient(180deg, #0d0b0a 0%, #15100d 100%);
+  }
+  .hud {
+    border: 2px solid #7d5b36;
+    background: #1d140f;
+    padding: 8px 10px;
+    font-size: 13px;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+  }
+  .stageWrap {
+    flex: 1;
+    border: 3px solid #7d5b36;
+    background: #20170f;
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .leftCluster, .rightCluster {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  .btn {
+    width: 84px;
+    height: 84px;
+    border-radius: 18px;
+    border: 2px solid #7d5b36;
+    background: linear-gradient(180deg, #3a2a1b, #251a12);
+    color: #f1e0bb;
+    font-size: 34px;
+    font-family: monospace;
+    box-shadow: 0 4px 0 #120d09;
+  }
+  .btn:active, .btn.pressed {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #120d09;
+    filter: brightness(1.1);
+  }
+  .tip {
+    text-align: center;
+    font-size: 11px;
+    color: #cdb58a;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hud" id="hud">Загрузка…</div>
+  <div class="stageWrap">
+    <canvas id="game" width="432" height="768"></canvas>
+  </div>
+  <div class="controls">
+    <div class="leftCluster">
+      <button class="btn" id="left">←</button>
+      <button class="btn" id="right">→</button>
+    </div>
+    <div class="rightCluster">
+      <button class="btn" id="jump">↑</button>
+    </div>
+  </div>
+  <div class="tip">Вертикальный мобильный прототип. Доберись до ключа, потом до двери.</div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const hud = document.getElementById('hud');
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const gravity = 0.58;
+  const TILE = 48;
+
+  const level = [
+    "#########",
+    "#......D#",
+    "#.......#",
+    "#...###.#",
+    "#.......#",
+    "#..^....#",
+    "#....##.#",
+    "#.......#",
+    "#..###..#",
+    "#.......#",
+    "#....K..#",
+    "#.###...#",
+    "#.......#",
+    "#..^....#",
+    "#....##.#",
+    "#.......#",
+    "#P......#",
+    "#########"
+  ];
+
+  const worldH = level.length * TILE;
+
+  const input = { left:false, right:false, jump:false, jumpLatch:false };
+
+  const player = {
+    x: 0, y: 0, w: 24, h: 42,
+    vx: 0, vy: 0,
+    onGround: false,
+    facing: 1,
+    hasKey: false,
+    lives: 3,
+    won: false,
+    anim: 0
+  };
+
+  let cameraY = 0;
+  let key = { x:0, y:0, w:20, h:20, taken:false };
+  let door = { x:0, y:0, w:36, h:48, open:false };
+
+  function parseLevel() {
+    for (let y = 0; y < level.length; y++) {
+      for (let x = 0; x < level[y].length; x++) {
+        const c = level[y][x];
+        if (c === 'P') {
+          player.x = x * TILE + 12;
+          player.y = y * TILE + 4;
+        } else if (c === 'K') {
+          key.x = x * TILE + 14;
+          key.y = y * TILE + 14;
+        } else if (c === 'D') {
+          door.x = x * TILE + 6;
+          door.y = y * TILE;
+        }
+      }
+    }
+  }
+
+  function tileAt(tx, ty) {
+    if (ty < 0 || ty >= level.length || tx < 0 || tx >= level[0].length) return '#';
+    return level[ty][tx];
+  }
+
+  function solidAt(px, py) {
+    const tx = Math.floor(px / TILE);
+    const ty = Math.floor(py / TILE);
+    const t = tileAt(tx, ty);
+    if (t === '#') return true;
+    if (!door.open) {
+      if (px >= door.x && px < door.x + door.w && py >= door.y && py < door.y + door.h) return true;
+    }
+    return false;
+  }
+
+  function overlap(a,b) {
+    return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+  }
+
+  function message(text) {
+    hud.textContent = `Жизни: ${player.lives} · Ключ: ${player.hasKey ? 'да' : 'нет'} · ${text}`;
+  }
+
+  function reset(full=false) {
+    parseLevel();
+    player.vx = 0;
+    player.vy = 0;
+    player.onGround = false;
+    player.facing = 1;
+    player.won = false;
+    if (full) {
+      player.lives = 3;
+      player.hasKey = false;
+      key.taken = false;
+      door.open = false;
+    }
+    cameraY = Math.max(0, Math.min(worldH - H, player.y - H * 0.65));
+    message("Доберись до ключа, потом до двери");
+  }
+
+  function die(reason) {
+    player.lives -= 1;
+    if (player.lives <= 0) {
+      reset(true);
+      message("Новая игра");
+    } else {
+      const keepLives = player.lives;
+      const hadResetLives = player.lives;
+      const full = false;
+      parseLevel();
+      player.vx = 0; player.vy = 0; player.onGround = false; player.facing = 1; player.won = false;
+      player.hasKey = false; key.taken = false; door.open = false;
+      player.lives = keepLives;
+      cameraY = Math.max(0, Math.min(worldH - H, player.y - H * 0.65));
+      message(reason || "Осторожно");
+    }
+  }
+
+  function spikeRects() {
+    const out = [];
+    for (let y = 0; y < level.length; y++) {
+      for (let x = 0; x < level[y].length; x++) {
+        if (level[y][x] === '^') out.push({ x: x*TILE+6, y: y*TILE+22, w:TILE-12, h:20 });
+      }
+    }
+    return out;
+  }
+  const spikes = spikeRects();
+
+  function moveX(v) {
+    player.x += v;
+    if (v > 0) {
+      if (solidAt(player.x + player.w, player.y + 3) || solidAt(player.x + player.w, player.y + player.h - 3)) {
+        player.x = Math.floor((player.x + player.w) / TILE) * TILE - player.w - 0.01;
+        player.vx = 0;
+      }
+    } else if (v < 0) {
+      if (solidAt(player.x, player.y + 3) || solidAt(player.x, player.y + player.h - 3)) {
+        player.x = Math.floor(player.x / TILE + 1) * TILE + 0.01;
+        player.vx = 0;
+      }
+    }
+  }
+
+  function moveY(v) {
+    player.y += v;
+    player.onGround = false;
+    if (v > 0) {
+      if (solidAt(player.x + 4, player.y + player.h) || solidAt(player.x + player.w - 4, player.y + player.h)) {
+        player.y = Math.floor((player.y + player.h) / TILE) * TILE - player.h - 0.01;
+        player.vy = 0;
+        player.onGround = true;
+      }
+    } else if (v < 0) {
+      if (solidAt(player.x + 4, player.y) || solidAt(player.x + player.w - 4, player.y)) {
+        player.y = Math.floor(player.y / TILE + 1) * TILE + 0.01;
+        player.vy = 0;
+      }
+    }
+  }
+
+  function update() {
+    if (player.won) return;
+
+    if (input.left && !input.right) {
+      player.vx = -3.6;
+      player.facing = -1;
+    } else if (input.right && !input.left) {
+      player.vx = 3.6;
+      player.facing = 1;
+    } else {
+      player.vx *= 0.72;
+      if (Math.abs(player.vx) < 0.05) player.vx = 0;
+    }
+
+    if (input.jump && player.onGround && !input.jumpLatch) {
+      player.vy = -10.5;
+      player.onGround = false;
+      input.jumpLatch = true;
+    }
+    if (!input.jump) input.jumpLatch = false;
+
+    player.vy += gravity;
+    if (player.vy > 14) player.vy = 14;
+
+    moveX(player.vx);
+    moveY(player.vy);
+
+    player.anim += Math.abs(player.vx) * 0.12;
+
+    for (const s of spikes) {
+      if (overlap(player, s)) {
+        die("Шипы");
+        return;
+      }
+    }
+
+    if (!key.taken && overlap(player, key)) {
+      key.taken = true;
+      player.hasKey = true;
+      door.open = true;
+      message("Ключ найден. Дверь открыта");
+    }
+
+    if (door.open && overlap(player, door)) {
+      player.won = true;
+      message("Победа");
+    }
+
+    if (player.y > worldH + 100) die("Падение");
+
+    const target = player.y - H * 0.58;
+    cameraY += (target - cameraY) * 0.10;
+    cameraY = Math.max(0, Math.min(worldH - H, cameraY));
+  }
+
+  function drawBg() {
+    ctx.fillStyle = '#1b130d';
+    ctx.fillRect(0,0,W,H);
+    for (let i = 0; i < 7; i++) {
+      const x = 30 + i * 58;
+      ctx.fillStyle = i % 2 ? '#281b12' : '#24180f';
+      ctx.fillRect(x, 20, 16, H-40);
+    }
+  }
+
+  function drawWorld() {
+    ctx.save();
+    ctx.translate(0, -cameraY);
+
+    for (let y = 0; y < level.length; y++) {
+      for (let x = 0; x < level[y].length; x++) {
+        const c = level[y][x];
+        const px = x * TILE;
+        const py = y * TILE;
+        if (c === '#') {
+          ctx.fillStyle = '#6d5431';
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = '#8d6d43';
+          ctx.fillRect(px+4, py+4, TILE-8, TILE-8);
+          ctx.fillStyle = '#c9a66d';
+          ctx.fillRect(px+6, py+6, 14, 5);
+          ctx.fillRect(px+26, py+6, 14, 5);
+          ctx.fillRect(px+6, py+28, 14, 5);
+          ctx.fillRect(px+26, py+28, 14, 5);
+        }
+        if (c === '^') {
+          ctx.fillStyle = '#d7dde3';
+          for (let i = 0; i < 4; i++) {
+            const bx = px + i * 12;
+            ctx.beginPath();
+            ctx.moveTo(bx + 2, py + TILE);
+            ctx.lineTo(bx + 8, py + 18);
+            ctx.lineTo(bx + 14, py + TILE);
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    if (!key.taken) {
+      ctx.strokeStyle = '#ffd36c';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(key.x + 8, key.y + 8, 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#ffd36c';
+      ctx.fillRect(key.x + 14, key.y + 6, 10, 4);
+      ctx.fillRect(key.x + 20, key.y + 6, 4, 12);
+    }
+
+    ctx.fillStyle = door.open ? 'rgba(140,200,140,0.45)' : '#5f7f8b';
+    ctx.fillRect(door.x, door.y, door.w, door.h);
+    ctx.fillStyle = door.open ? '#9ee37d' : '#9ab1bb';
+    ctx.fillRect(door.x+7, door.y+6, 5, 36);
+    ctx.fillRect(door.x+16, door.y+6, 5, 36);
+    ctx.fillRect(door.x+25, door.y+6, 5, 36);
+
+    const step = Math.sin(player.anim) * 3;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(player.x+4, player.y+player.h-2, player.w, 6);
+
+    ctx.fillStyle = '#eadfc5';
+    ctx.fillRect(player.x+6, player.y+4, 12, 14);
+    ctx.fillRect(player.x+5, player.y+18, 14, 14);
+
+    ctx.fillStyle = '#b83a2f';
+    ctx.fillRect(player.x+4, player.y+23, 16, 4);
+
+    ctx.fillStyle = '#eadfc5';
+    ctx.fillRect(player.x+6, player.y+32, 4, 10 + Math.max(0, step));
+    ctx.fillRect(player.x+13, player.y+32, 4, 10 + Math.max(0, -step));
+    ctx.fillRect(player.x + (player.facing === 1 ? 15 : 1), player.y + 18, 8, 4);
+    ctx.fillRect(player.x + 6, player.y + 18, 8, 4);
+
+    ctx.fillStyle = '#111';
+    ctx.fillRect(player.x + (player.facing === 1 ? 13 : 8), player.y + 9, 2, 2);
+
+    ctx.restore();
+
+    if (player.won) {
+      ctx.fillStyle = 'rgba(0,0,0,0.58)';
+      ctx.fillRect(70, 300, W-140, 110);
+      ctx.strokeStyle = '#c9a66d';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(70, 300, W-140, 110);
+      ctx.fillStyle = '#f1e0bb';
+      ctx.font = '28px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('ПОБЕДА', W/2, 345);
+      ctx.font = '14px monospace';
+      ctx.fillText('Обнови страницу для новой попытки', W/2, 380);
+    }
+  }
+
+  function loop() {
+    update();
+    drawBg();
+    drawWorld();
+    requestAnimationFrame(loop);
+  }
+
+  function bindHold(id, keyName) {
+    const el = document.getElementById(id);
+    const on = (e) => { e.preventDefault(); input[keyName] = true; el.classList.add('pressed'); };
+    const off = (e) => { e.preventDefault(); input[keyName] = false; el.classList.remove('pressed'); };
+    ['touchstart','pointerdown','mousedown'].forEach(ev => el.addEventListener(ev, on, {passive:false}));
+    ['touchend','touchcancel','pointerup','pointercancel','mouseup','mouseleave'].forEach(ev => el.addEventListener(ev, off, {passive:false}));
+  }
+
+  bindHold('left', 'left');
+  bindHold('right', 'right');
+  bindHold('jump', 'jump');
+
+  parseLevel();
+  message("Доберись до ключа, потом до двери");
+  loop();
+})();
+</script>
+</body>
+</html>
