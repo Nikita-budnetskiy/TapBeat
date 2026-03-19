@@ -4,13 +4,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>Velvet Palace</title>
+<title>Forest Runner Prototype</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
   html, body {
     margin: 0;
-    background: #0d1117;
-    color: #f6eee4;
+    background: #0f1720;
+    color: #f5efe6;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
     height: 100%;
     overflow: hidden;
@@ -21,39 +21,35 @@
     align-items: stretch;
   }
   .app {
-    width: min(100vw, 480px);
+    width: min(100vw, 900px);
     height: 100vh;
     display: flex;
     flex-direction: column;
     padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)) 10px;
     gap: 10px;
     background:
-      radial-gradient(circle at top, rgba(168,122,109,0.18), transparent 32%),
-      linear-gradient(180deg, #0e1118 0%, #121923 100%);
+      radial-gradient(circle at top left, rgba(241, 193, 143, 0.12), transparent 30%),
+      linear-gradient(180deg, #0f1720 0%, #172432 100%);
   }
   .hud {
-    border: 1px solid rgba(231, 210, 191, 0.22);
-    background: rgba(22, 28, 38, 0.82);
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(17, 25, 34, 0.72);
     backdrop-filter: blur(10px);
-    color: #f5eadb;
-    padding: 10px 12px;
-    font-size: 14px;
+    border-radius: 16px;
     min-height: 56px;
     display: flex;
     align-items: center;
+    padding: 10px 14px;
     line-height: 1.35;
-    border-radius: 16px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    font-size: 14px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.18);
   }
   .stageWrap {
     flex: 1;
-    border: 1px solid rgba(231, 210, 191, 0.22);
-    background:
-      linear-gradient(180deg, rgba(33, 39, 55, 0.9), rgba(20, 24, 34, 0.96)),
-      #151925;
-    position: relative;
-    overflow: hidden;
     border-radius: 22px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: #152232;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
   }
   canvas {
@@ -77,22 +73,22 @@
     width: 86px;
     height: 86px;
     border-radius: 22px;
-    border: 1px solid rgba(231, 210, 191, 0.18);
+    border: 1px solid rgba(255,255,255,0.12);
     background:
       linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015)),
-      linear-gradient(180deg, #232b38, #161c27);
-    color: #f7efe4;
+      linear-gradient(180deg, #2a3746, #1a2531);
+    color: #f8f0e6;
     font-size: 34px;
     box-shadow: 0 10px 24px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
   }
   .btn:active, .btn.pressed {
     transform: translateY(2px) scale(0.985);
-    filter: brightness(1.06);
+    filter: brightness(1.08);
   }
   .tip {
     text-align: center;
     font-size: 11px;
-    color: rgba(245,234,219,0.72);
+    color: rgba(245,239,230,0.72);
     line-height: 1.35;
   }
 </style>
@@ -101,7 +97,7 @@
 <div class="app">
   <div class="hud" id="hud">Загрузка…</div>
   <div class="stageWrap">
-    <canvas id="game" width="432" height="768"></canvas>
+    <canvas id="game" width="960" height="540"></canvas>
   </div>
   <div class="controls">
     <div class="leftCluster">
@@ -112,7 +108,7 @@
       <button class="btn" id="jump">↑</button>
     </div>
   </div>
-  <div class="tip">Теперь уровни сделаны как честная лестница вверх: без нереальных прыжков, с мягкой палитрой и живее анимацией.</div>
+  <div class="tip">Теперь это горизонтальный сайдскроллер. Камера идёт за героем, путь реально проходимый.</div>
 </div>
 
 <script>
@@ -123,132 +119,114 @@
 
   const W = canvas.width;
   const H = canvas.height;
-  const TILE = 36;
-  const GRAVITY = 0.46;
-  const RUN = 3.4;
-  const JUMP = 9.6;
-  const MAX_FALL = 11;
+  const TILE = 48;
+  const GRAVITY = 0.58;
+  const RUN = 4.2;
+  const JUMP = 11.5;
+  const MAX_FALL = 13;
 
   const PALETTE = {
-    bgTop: "#1f2735",
-    bgBottom: "#121925",
-    pillarA: "rgba(198,153,136,0.09)",
-    pillarB: "rgba(153,168,195,0.06)",
-    line: "rgba(255,235,215,0.05)",
-    wall1: "#d7c2a6",
-    wall2: "#b99873",
-    wall3: "#f1e0c6",
-    player: "#f8efe2",
-    hair: "#2a3140",
-    sash: "#bc7f76",
-    eye: "#1b1f28",
-    key: "#f4cf7a",
-    door: "#93b7a4",
-    doorDark: "#678b79",
-    spike: "#d7dce5",
-    shadow: "rgba(0,0,0,0.22)",
-    dust: "rgba(246,234,219,0.75)"
+    skyTop: "#a9d7f2",
+    skyBottom: "#f4e3c4",
+    mountainFar: "#9eb6b0",
+    mountainNear: "#708a7c",
+    treeDark: "#29443b",
+    treeMid: "#416658",
+    bush: "#5f8a6f",
+    grass: "#89b67d",
+    dirt: "#8a6850",
+    dirtDark: "#6e4f3d",
+    pathLight: "#b99672",
+    coin: "#f5cc6d",
+    exit: "#8bd1c2",
+    exitDark: "#4f8d81",
+    shadow: "rgba(0,0,0,0.18)",
+    skin: "#f0d7c2",
+    hair: "#3b2d28",
+    shirt: "#f0efe8",
+    vest: "#7a8fa7",
+    pants: "#324256",
+    scarf: "#c98073",
+    eye: "#1b2229",
+    dust: "rgba(255,255,255,0.55)"
   };
 
   const levels = [
     [
-      "############",
-      "#.........D#",
-      "#..........#",
-      "#.......##.#",
-      "#..........#",
-      "#.....##...#",
-      "#..........#",
-      "#...##.....#",
-      "#..........#",
-      "#......K...#",
-      "#..........#",
-      "#....##....#",
-      "#..........#",
-      "#..##......#",
-      "#..........#",
-      "#.##.......#",
-      "#..........#",
-      "#P.........#",
-      "############"
+      "................................................................................",
+      ".............................................................................E..",
+      ".........................................C......................................",
+      "....................................###.........................................",
+      "............................###.......................###.......................",
+      "......................###......................................................",
+      "...............###.............................................................",
+      "......###......................................###..............................",
+      "................................................................................",
+      "....P...........................................................................",
+      "####################....################....###############....##################",
+      "####################....################....###############....##################"
     ],
     [
-      "############",
-      "#....D.....#",
-      "#..........#",
-      "#....##....#",
-      "#..........#",
-      "#......##..#",
-      "#..........#",
-      "#...##.....#",
-      "#..........#",
-      "#.......K..#",
-      "#..........#",
-      "#.....##...#",
-      "#..........#",
-      "#..##......#",
-      "#..........#",
-      "#.##.......#",
-      "#..........#",
-      "#P.........#",
-      "############"
+      "................................................................................",
+      ".....................................................................E..........",
+      "............................................C...................................",
+      ".....................................###........................###.............",
+      ".........................###.....................................................",
+      "...............###.........................###...................................",
+      "..............................................................###...............",
+      ".....###.......................................................................",
+      ".........................^^^....................................................",
+      "..P.............................................................................",
+      "#################....###############....#############....########################",
+      "#################....###############....#############....########################"
     ],
     [
-      "############",
-      "#........D.#",
-      "#..........#",
-      "#......##..#",
-      "#..........#",
-      "#..^.......#",
-      "#....##....#",
-      "#..........#",
-      "#......##..#",
-      "#..........#",
-      "#...K......#",
-      "#..........#",
-      "#....##....#",
-      "#..........#",
-      "#......^...#",
-      "#..##......#",
-      "#..........#",
-      "#P.........#",
-      "############"
+      "................................................................................",
+      ".............................................................................E..",
+      ".............................................###................................",
+      ".................................C..............................................",
+      "..........................###.........................###.......................",
+      ".................###............................................................",
+      "......................................^^^......................................",
+      "......###........................................###............................",
+      "................................................................................",
+      ".P..............................................................................",
+      "################....#################....###############....#####################",
+      "################....#################....###############....#####################"
     ]
   ];
 
+  const input = { left:false, right:false, jump:false, jumpLatch:false };
   let levelIndex = 0;
   let level = null;
   let spikes = [];
   let particles = [];
-  let cameraY = 0;
+  let cameraX = 0;
   let frame = 0;
-  let msg = "Доберись до ключа, потом до двери";
-  let msgTimer = 90;
-
-  const input = { left:false, right:false, jump:false, jumpLatch:false };
+  let msg = "Доберись до монеты, потом до выхода";
+  let msgTimer = 100;
 
   const player = {
-    x: 0, y: 0, w: 22, h: 38,
+    x: 0, y: 0, w: 26, h: 48,
     vx: 0, vy: 0,
     onGround: false,
     coyote: 0,
     facing: 1,
-    hasKey: false,
+    hasCoin: false,
     won: false,
     lives: 3,
     anim: 0,
     squashX: 1,
-    squashY: 1,
+    squashY: 1
   };
-
-  function setHud() {
-    const text = msgTimer > 0 ? msg : "Доберись до ключа, потом до двери";
-    hud.textContent = `Уровень ${levelIndex + 1}/${levels.length} · Жизни ${player.lives} · Ключ ${player.hasKey ? "да" : "нет"} · ${text}`;
-  }
 
   function flash(text, frames = 90) {
     msg = text;
     msgTimer = frames;
+  }
+
+  function setHud() {
+    hud.textContent = `Уровень ${levelIndex + 1}/${levels.length} · Жизни ${player.lives} · Монета ${player.hasCoin ? "да" : "нет"} · ${msgTimer > 0 ? msg : "Доберись до монеты, потом до выхода"}`;
   }
 
   function parseLevel(index) {
@@ -257,28 +235,28 @@
       map,
       width: map[0].length,
       height: map.length,
-      worldH: map.length * TILE,
-      key: {x:0, y:0, w:18, h:18, taken:false},
-      door: {x:0, y:0, w:28, h:40, open:false}
+      worldW: map[0].length * TILE,
+      coin: {x:0, y:0, w:20, h:20, taken:false},
+      exit: {x:0, y:0, w:30, h:62, open:false}
     };
     spikes = [];
     for (let y = 0; y < map.length; y++) {
       for (let x = 0; x < map[y].length; x++) {
         const c = map[y][x];
         if (c === "P") {
-          player.x = x * TILE + 7;
+          player.x = x * TILE + 10;
           player.y = y * TILE - 2;
           map[y][x] = ".";
-        } else if (c === "K") {
-          data.key.x = x * TILE + 10;
-          data.key.y = y * TILE + 10;
+        } else if (c === "C") {
+          data.coin.x = x * TILE + 14;
+          data.coin.y = y * TILE + 12;
           map[y][x] = ".";
-        } else if (c === "D") {
-          data.door.x = x * TILE + 4;
-          data.door.y = y * TILE;
+        } else if (c === "E") {
+          data.exit.x = x * TILE + 10;
+          data.exit.y = y * TILE - 14;
           map[y][x] = ".";
         } else if (c === "^") {
-          spikes.push({ x: x*TILE+5, y: y*TILE+18, w: TILE-10, h: 18 });
+          spikes.push({x:x*TILE+6, y:y*TILE+28, w:TILE-12, h:18});
           map[y][x] = ".";
         }
       }
@@ -293,14 +271,14 @@
     player.onGround = false;
     player.coyote = 0;
     player.facing = 1;
-    player.hasKey = false;
+    player.hasCoin = false;
     player.won = false;
     player.anim = 0;
     player.squashX = 1;
     player.squashY = 1;
     if (!keepLives) player.lives = 3;
-    cameraY = Math.max(0, Math.min(level.worldH - H, player.y - H * 0.65));
-    flash("Уровень " + (index + 1), 70);
+    cameraX = Math.max(0, Math.min(level.worldW - W, player.x - W * 0.35));
+    flash("Уровень " + (index + 1), 60);
     setHud();
   }
 
@@ -313,20 +291,20 @@
     const tx = Math.floor(px / TILE);
     const ty = Math.floor(py / TILE);
     if (tileAt(tx, ty) === "#") return true;
-    if (!level.door.open && px >= level.door.x && px < level.door.x + level.door.w && py >= level.door.y && py < level.door.y + level.door.h) return true;
+    if (!level.exit.open && px >= level.exit.x && px < level.exit.x + level.exit.w && py >= level.exit.y && py < level.exit.y + level.exit.h) return true;
     return false;
   }
 
-  function rectsOverlap(a, b) {
-    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  function overlap(a,b) {
+    return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
   }
 
   function spawnDust(x, y, n = 6) {
     for (let i = 0; i < n; i++) {
       particles.push({
         x, y,
-        vx: (Math.random() - 0.5) * 1.3,
-        vy: -Math.random() * 1.0 - 0.1,
+        vx: (Math.random() - 0.5) * 1.8,
+        vy: -Math.random() * 1.2,
         life: 18 + Math.random() * 8,
         size: 2 + Math.random() * 2
       });
@@ -336,12 +314,12 @@
   function moveX(v) {
     player.x += v;
     if (v > 0) {
-      if (solidAt(player.x + player.w, player.y + 2) || solidAt(player.x + player.w, player.y + player.h - 2)) {
+      if (solidAt(player.x + player.w, player.y + 4) || solidAt(player.x + player.w, player.y + player.h - 4)) {
         player.x = Math.floor((player.x + player.w) / TILE) * TILE - player.w - 0.01;
         player.vx = 0;
       }
     } else if (v < 0) {
-      if (solidAt(player.x, player.y + 2) || solidAt(player.x, player.y + player.h - 2)) {
+      if (solidAt(player.x, player.y + 4) || solidAt(player.x, player.y + player.h - 4)) {
         player.x = Math.floor(player.x / TILE + 1) * TILE + 0.01;
         player.vx = 0;
       }
@@ -349,38 +327,38 @@
   }
 
   function moveY(v) {
-    const wasOnGround = player.onGround;
+    const wasGrounded = player.onGround;
     player.y += v;
     player.onGround = false;
 
     if (v > 0) {
-      if (solidAt(player.x + 3, player.y + player.h) || solidAt(player.x + player.w - 3, player.y + player.h)) {
+      if (solidAt(player.x + 4, player.y + player.h) || solidAt(player.x + player.w - 4, player.y + player.h)) {
         player.y = Math.floor((player.y + player.h) / TILE) * TILE - player.h - 0.01;
         player.vy = 0;
         player.onGround = true;
-        if (!wasOnGround) {
+        if (!wasGrounded) {
           player.squashX = 1.12;
-          player.squashY = 0.84;
-          spawnDust(player.x + player.w / 2, player.y + player.h, 6);
+          player.squashY = 0.86;
+          spawnDust(player.x + player.w / 2, player.y + player.h, 7);
         }
       }
     } else if (v < 0) {
-      if (solidAt(player.x + 3, player.y) || solidAt(player.x + player.w - 3, player.y)) {
+      if (solidAt(player.x + 4, player.y) || solidAt(player.x + player.w - 4, player.y)) {
         player.y = Math.floor(player.y / TILE + 1) * TILE + 0.01;
         player.vy = 0;
       }
     }
   }
 
-  function resetSameLevel(reason) {
+  function resetLevel(reason) {
     player.lives -= 1;
     if (player.lives <= 0) {
       levelIndex = 0;
       loadLevel(0, false);
-      flash("Попробуем сначала", 120);
+      flash("Снова с начала", 120);
     } else {
       loadLevel(levelIndex, true);
-      flash(reason, 90);
+      flash(reason, 80);
     }
   }
 
@@ -389,7 +367,7 @@
     if (levelIndex >= levels.length) {
       levelIndex = 0;
       loadLevel(0, false);
-      flash("Все уровни пройдены. Снова с первого", 140);
+      flash("Ты прошёл все уровни", 140);
     } else {
       loadLevel(levelIndex, true);
     }
@@ -399,7 +377,7 @@
     for (const p of particles) {
       p.x += p.vx;
       p.y += p.vy;
-      p.vy += 0.04;
+      p.vy += 0.05;
       p.life -= 1;
     }
     particles = particles.filter(p => p.life > 0);
@@ -423,8 +401,8 @@
       player.vx = RUN;
       player.facing = 1;
     } else {
-      player.vx *= 0.74;
-      if (Math.abs(player.vx) < 0.04) player.vx = 0;
+      player.vx *= 0.76;
+      if (Math.abs(player.vx) < 0.05) player.vx = 0;
     }
 
     if (player.onGround) player.coyote = 7;
@@ -435,8 +413,8 @@
       player.onGround = false;
       player.coyote = 0;
       input.jumpLatch = true;
-      player.squashX = 0.9;
-      player.squashY = 1.14;
+      player.squashX = 0.92;
+      player.squashY = 1.12;
     }
     if (!input.jump) input.jumpLatch = false;
 
@@ -446,186 +424,219 @@
     moveX(player.vx);
     moveY(player.vy);
 
-    player.anim += Math.abs(player.vx) * 0.18 + 0.03;
+    player.anim += Math.abs(player.vx) * 0.16 + 0.04;
     player.squashX += (1 - player.squashX) * 0.18;
     player.squashY += (1 - player.squashY) * 0.18;
 
     for (const s of spikes) {
-      if (rectsOverlap(player, s)) {
-        resetSameLevel("Шипы");
+      if (overlap(player, s)) {
+        resetLevel("Шипы");
         return;
       }
     }
 
-    if (!level.key.taken && rectsOverlap(player, level.key)) {
-      level.key.taken = true;
-      player.hasKey = true;
-      level.door.open = true;
-      flash("Ключ найден. Выход открыт", 110);
+    if (!level.coin.taken && overlap(player, level.coin)) {
+      level.coin.taken = true;
+      player.hasCoin = true;
+      level.exit.open = true;
+      flash("Монета найдена. Выход открыт", 100);
     }
 
-    if (level.door.open && rectsOverlap(player, level.door)) {
+    if (level.exit.open && overlap(player, level.exit)) {
       player.won = true;
-      flash("Уровень пройден", 80);
+      flash("Уровень пройден", 70);
     }
 
-    if (player.y > level.worldH + 60) {
-      resetSameLevel("Падение");
+    if (player.y > H + 200) {
+      resetLevel("Падение");
       return;
     }
 
-    const targetCam = player.y - H * 0.56;
-    cameraY += (targetCam - cameraY) * 0.1;
-    cameraY = Math.max(0, Math.min(level.worldH - H, cameraY));
+    const targetCam = player.x - W * 0.35;
+    cameraX += (targetCam - cameraX) * 0.1;
+    cameraX = Math.max(0, Math.min(level.worldW - W, cameraX));
 
     updateParticles();
     setHud();
   }
 
-  function drawBackground() {
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, PALETTE.bgTop);
-    g.addColorStop(1, PALETTE.bgBottom);
-    ctx.fillStyle = g;
+  function drawNatureBackground() {
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, PALETTE.skyTop);
+    sky.addColorStop(1, PALETTE.skyBottom);
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, H);
 
-    for (let i = 0; i < 6; i++) {
-      const x = 24 + i * 70;
-      ctx.fillStyle = i % 2 ? PALETTE.pillarA : PALETTE.pillarB;
-      ctx.fillRect(x, 0, 18, H);
+    ctx.fillStyle = PALETTE.mountainFar;
+    ctx.beginPath();
+    ctx.moveTo(0, 260);
+    ctx.lineTo(110, 170);
+    ctx.lineTo(240, 260);
+    ctx.lineTo(380, 145);
+    ctx.lineTo(560, 260);
+    ctx.lineTo(720, 175);
+    ctx.lineTo(960, 260);
+    ctx.lineTo(960, H);
+    ctx.lineTo(0, H);
+    ctx.fill();
+
+    ctx.fillStyle = PALETTE.mountainNear;
+    ctx.beginPath();
+    ctx.moveTo(0, 300);
+    ctx.lineTo(140, 215);
+    ctx.lineTo(300, 300);
+    ctx.lineTo(470, 205);
+    ctx.lineTo(660, 300);
+    ctx.lineTo(860, 220);
+    ctx.lineTo(960, 300);
+    ctx.lineTo(960, H);
+    ctx.lineTo(0, H);
+    ctx.fill();
+
+    const treeOffset1 = -(cameraX * 0.18) % 180;
+    for (let i = -1; i < 8; i++) {
+      const x = treeOffset1 + i * 180;
+      ctx.fillStyle = PALETTE.treeDark;
+      ctx.fillRect(x + 24, 240, 18, 170);
+      ctx.beginPath();
+      ctx.arc(x + 32, 220, 44, 0, Math.PI * 2);
+      ctx.arc(x + 5, 245, 34, 0, Math.PI * 2);
+      ctx.arc(x + 60, 248, 36, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    ctx.strokeStyle = PALETTE.line;
-    ctx.lineWidth = 1;
-    for (let y = -((frame * 0.25) % 56); y < H + 56; y += 56) {
+    const treeOffset2 = -(cameraX * 0.3) % 130;
+    for (let i = -1; i < 10; i++) {
+      const x = treeOffset2 + i * 130;
+      ctx.fillStyle = PALETTE.treeMid;
+      ctx.fillRect(x + 18, 310, 12, 120);
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
-      ctx.stroke();
+      ctx.arc(x + 24, 295, 28, 0, Math.PI * 2);
+      ctx.arc(x + 5, 315, 22, 0, Math.PI * 2);
+      ctx.arc(x + 42, 315, 22, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
-  function drawBrick(x, y) {
-    ctx.fillStyle = PALETTE.wall1;
-    ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = PALETTE.wall2;
-    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-    ctx.fillStyle = PALETTE.wall3;
-    ctx.fillRect(x + 5, y + 6, 10, 3);
-    ctx.fillRect(x + 20, y + 6, 10, 3);
-    ctx.fillRect(x + 5, y + 21, 10, 3);
-    ctx.fillRect(x + 20, y + 21, 10, 3);
+  function drawTile(px, py) {
+    ctx.fillStyle = PALETTE.dirt;
+    ctx.fillRect(px, py, TILE, TILE);
+    ctx.fillStyle = PALETTE.dirtDark;
+    ctx.fillRect(px, py + TILE - 16, TILE, 16);
+    ctx.fillStyle = PALETTE.pathLight;
+    ctx.fillRect(px, py, TILE, 12);
+    ctx.fillStyle = PALETTE.grass;
+    ctx.fillRect(px, py, TILE, 6);
   }
 
   function drawWorld() {
     ctx.save();
-    ctx.translate(0, -cameraY);
+    ctx.translate(-cameraX, 0);
 
     for (let y = 0; y < level.height; y++) {
       for (let x = 0; x < level.width; x++) {
         const c = level.map[y][x];
-        const px = x * TILE;
-        const py = y * TILE;
-        if (c === "#") drawBrick(px, py);
+        if (c === "#") drawTile(x * TILE, y * TILE);
       }
     }
 
     for (const s of spikes) {
-      ctx.fillStyle = PALETTE.spike;
+      ctx.fillStyle = "#dbe1ea";
       for (let i = 0; i < 3; i++) {
         const bx = s.x + i * (s.w / 3);
         ctx.beginPath();
-        ctx.moveTo(bx + 1, s.y + s.h);
+        ctx.moveTo(bx + 2, s.y + s.h);
         ctx.lineTo(bx + s.w / 6, s.y);
-        ctx.lineTo(bx + s.w / 3 - 1, s.y + s.h);
+        ctx.lineTo(bx + s.w / 3 - 2, s.y + s.h);
         ctx.fill();
       }
     }
 
-    if (!level.key.taken) {
-      const bob = Math.sin(frame * 0.12) * 3;
-      const shimmer = 0.82 + Math.sin(frame * 0.18) * 0.18;
-      ctx.globalAlpha = shimmer;
-      ctx.strokeStyle = PALETTE.key;
-      ctx.lineWidth = 3;
+    if (!level.coin.taken) {
+      const bob = Math.sin(frame * 0.13) * 4;
+      ctx.fillStyle = PALETTE.coin;
       ctx.beginPath();
-      ctx.arc(level.key.x + 7, level.key.y + 7 + bob, 7, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = PALETTE.key;
-      ctx.fillRect(level.key.x + 12, level.key.y + 5 + bob, 9, 3);
-      ctx.fillRect(level.key.x + 17, level.key.y + 5 + bob, 3, 10);
-      ctx.globalAlpha = 1;
+      ctx.arc(level.coin.x + 10, level.coin.y + 10 + bob, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.fillRect(level.coin.x + 7, level.coin.y + 3 + bob, 4, 14);
     }
 
-    ctx.fillStyle = level.door.open ? PALETTE.door : PALETTE.doorDark;
-    ctx.fillRect(level.door.x, level.door.y, level.door.w, level.door.h);
-    ctx.fillStyle = "#d8f2df";
-    ctx.fillRect(level.door.x + 5, level.door.y + 5, 4, 30);
-    ctx.fillRect(level.door.x + 12, level.door.y + 5, 4, 30);
-    ctx.fillRect(level.door.x + 19, level.door.y + 5, 4, 30);
+    ctx.fillStyle = level.exit.open ? PALETTE.exit : PALETTE.exitDark;
+    ctx.fillRect(level.exit.x, level.exit.y, level.exit.w, level.exit.h);
+    ctx.fillStyle = "#d9f2ec";
+    ctx.fillRect(level.exit.x + 6, level.exit.y + 7, 4, 42);
+    ctx.fillRect(level.exit.x + 14, level.exit.y + 7, 4, 42);
+    ctx.fillRect(level.exit.x + 22, level.exit.y + 7, 4, 42);
 
-    const idleBob = Math.sin(frame * 0.08) * (player.onGround && Math.abs(player.vx) < 0.15 ? 1.2 : 0.2);
-    const step = Math.sin(player.anim) * 3.2;
+    const idleBob = Math.sin(frame * 0.08) * (player.onGround && Math.abs(player.vx) < 0.15 ? 1.5 : 0.2);
+    const step = Math.sin(player.anim) * 4;
     const px = player.x;
     const py = player.y + idleBob;
 
     ctx.fillStyle = PALETTE.shadow;
-    ctx.fillRect(px + 4, py + player.h - 2, player.w, 5);
+    ctx.fillRect(px + 3, py + player.h - 2, player.w + 2, 6);
 
     ctx.save();
     ctx.translate(px + player.w / 2, py + player.h / 2);
     ctx.scale(player.squashX, player.squashY);
     ctx.translate(-(px + player.w / 2), -(py + player.h / 2));
 
-    ctx.fillStyle = PALETTE.player;
-    ctx.fillRect(px + 6, py + 3, 11, 12);
-    ctx.fillRect(px + 5, py + 15, 13, 14);
-
-    ctx.fillStyle = PALETTE.sash;
-    ctx.fillRect(px + 4, py + 20, 15, 4);
-
-    ctx.fillStyle = PALETTE.player;
-    if (player.onGround) {
-      ctx.fillRect(px + 6, py + 29, 4, 8 + Math.max(0, step));
-      ctx.fillRect(px + 12, py + 29, 4, 8 + Math.max(0, -step));
-      ctx.fillRect(px + (player.facing === 1 ? 14 : 0), py + 16, 8, 4);
-      ctx.fillRect(px + 5, py + 16, 8, 4);
-    } else {
-      ctx.fillRect(px + 6, py + 29, 4, 8);
-      ctx.fillRect(px + 12, py + 31, 4, 6);
-      ctx.fillRect(px + (player.facing === 1 ? 13 : 1), py + 18, 8, 3);
-      ctx.fillRect(px + 5, py + 14, 8, 3);
-    }
+    ctx.fillStyle = PALETTE.skin;
+    ctx.fillRect(px + 8, py + 4, 10, 12);
 
     ctx.fillStyle = PALETTE.hair;
-    ctx.fillRect(px + 7, py + 4, 9, 3);
+    ctx.fillRect(px + 7, py + 3, 12, 4);
+
+    ctx.fillStyle = PALETTE.shirt;
+    ctx.fillRect(px + 6, py + 16, 14, 12);
+
+    ctx.fillStyle = PALETTE.vest;
+    ctx.fillRect(px + 5, py + 18, 16, 10);
+
+    ctx.fillStyle = PALETTE.scarf;
+    ctx.fillRect(px + 5, py + 17, 16, 3);
+
+    ctx.fillStyle = PALETTE.pants;
+    if (player.onGround) {
+      ctx.fillRect(px + 7, py + 28, 5, 11 + Math.max(0, step));
+      ctx.fillRect(px + 14, py + 28, 5, 11 + Math.max(0, -step));
+      ctx.fillRect(px + (player.facing === 1 ? 16 : 2), py + 19, 8, 4);
+      ctx.fillRect(px + 5, py + 19, 8, 4);
+    } else {
+      ctx.fillRect(px + 7, py + 28, 5, 10);
+      ctx.fillRect(px + 14, py + 31, 5, 7);
+      ctx.fillRect(px + (player.facing === 1 ? 15 : 2), py + 20, 8, 3);
+      ctx.fillRect(px + 5, py + 16, 8, 3);
+    }
+
     ctx.fillStyle = PALETTE.eye;
-    ctx.fillRect(px + (player.facing === 1 ? 12 : 8), py + 8, 2, 2);
+    ctx.fillRect(px + (player.facing === 1 ? 14 : 10), py + 9, 2, 2);
 
     ctx.restore();
 
     for (const p of particles) {
-      ctx.fillStyle = `rgba(246,234,219,${Math.max(0, p.life / 24)})`;
+      ctx.fillStyle = `rgba(255,255,255,${Math.max(0, p.life / 24)})`;
       ctx.fillRect(p.x, p.y, p.size, p.size);
     }
 
     ctx.restore();
 
     if (msgTimer > 0) {
-      ctx.fillStyle = "rgba(14,17,24,0.5)";
-      ctx.fillRect(34, 22, W - 68, 34);
-      ctx.strokeStyle = "rgba(231,210,191,0.18)";
-      ctx.strokeRect(34, 22, W - 68, 34);
-      ctx.fillStyle = "#f7ecdf";
+      ctx.fillStyle = "rgba(17,25,34,0.38)";
+      ctx.fillRect(40, 20, W - 80, 36);
+      ctx.strokeStyle = "rgba(255,255,255,0.16)";
+      ctx.strokeRect(40, 20, W - 80, 36);
+      ctx.fillStyle = "#fff7ee";
       ctx.font = "16px -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(msg, W / 2, 45);
+      ctx.fillText(msg, W / 2, 44);
     }
   }
 
   function loop() {
     update();
-    drawBackground();
+    drawNatureBackground();
     drawWorld();
     requestAnimationFrame(loop);
   }
